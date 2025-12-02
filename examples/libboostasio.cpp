@@ -5,15 +5,14 @@
  * 
  *  @author Gavin Smith <gavin.smith@coralbay.tv>
  *
- *  Compile with g++ -std=c++14 libboostasio.cpp -o boost_test -lpthread -lboost_system -lamqpcpp
+ *  Compile with
+ *  g++ -std=c++17 libboostasio.cpp -o boost_test -lpthread -ldl -lboost_system -lamqpcpp
  */
 
 /**
  *  Dependencies
  */
-#include <boost/asio/io_service.hpp>
-#include <boost/asio/strand.hpp>
-#include <boost/asio/deadline_timer.hpp>
+#include <boost/asio/io_context.hpp>
 
 
 #include <amqpcpp.h>
@@ -27,30 +26,41 @@ int main()
 {
 
     // access to the boost asio handler
-    // note: we suggest use of 2 threads - normally one is fin (we are simply demonstrating thread safety).
-    boost::asio::io_service service(4);
+    boost::asio::io_context context;
 
-    // handler for libev
-    AMQP::LibBoostAsioHandler handler(service);
-    
+    // handler for libboostasio
+    AMQP::LibBoostAsioHandler handler(context);
+
     // make a connection
     AMQP::TcpConnection connection(&handler, AMQP::Address("amqp://guest:guest@localhost/"));
-    
+
     // we need a channel too
     AMQP::TcpChannel channel(&connection);
-    
+
+    channel.onReady([]() {
+        std::cout << "channel ready" << std::endl;
+            });
+    channel.onError([](const char *message) {
+        std::cout << "channel error: " << message << std::endl;
+            });
+
     // create a temporary queue
     channel.declareQueue(AMQP::exclusive).onSuccess([&connection](const std::string &name, uint32_t messagecount, uint32_t consumercount) {
-        
+
         // report the name of the temporary queue
         std::cout << "declared queue " << name << std::endl;
-        
+
         // now we can close the connection
         connection.close();
+
+    }).onError([](const char *message) {
+
+        // something went wrong creating the queue (or even before)
+        std::cerr << "declareQueue error: " << message << std::endl;
     });
-    
+
     // run the handler
-    // a t the moment, one will need SIGINT to stop.  In time, should add signal handling through boost API.
-    return service.run();
+    // at the moment, one will need SIGINT to stop.  In time, should add signal handling through boost API.
+    return context.run();
 }
 
