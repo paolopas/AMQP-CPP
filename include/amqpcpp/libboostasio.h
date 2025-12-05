@@ -158,6 +158,7 @@ protected:
             std::weak_ptr<Watcher> wpthis(shared_from_this());
 #endif
             const strand_weak_ptr wpstrand = _wpstrand;
+
             return
 #if __cplusplus >= 201402L
                 // C++14 lambda has init capture
@@ -175,7 +176,9 @@ protected:
                     // is the strand still here?
                     if (!strand) return;
 
-                    boost::asio::dispatch(strand->context().get_executor(),
+                    boost::asio::dispatch(*strand,
+                        // moving spwatcher into the bind ensures that the watcher
+                        // will not be destroyed for the duration of the callback
                         std::bind(std::move(mmfn), std::move(spwatcher), ec, connection, fd));
                 };
         }
@@ -347,10 +350,8 @@ protected:
          */
         ~Watcher()
         {
-            stop_timer();
-            _read = false;
-            _write = false;
             _socket.release();
+            stop_timer();
         }
 
         /**
@@ -546,8 +547,6 @@ public:
 
     /**
      *  Handler cannot be default constructed.
-     *
-     *  @param  that    The object to not move or copy
      */
     LibBoostAsioHandler() = delete;
 
