@@ -204,6 +204,8 @@ protected:
                             std::chrono::seconds((_timeout >> 1) + _timeout + 1);
                 }
 
+                // note that this is tipically a reentrant call, i.e. may block until the whole
+                // frame was received (this will increase the shared_from_this().use_count()
                 connection->process(fd, AMQP::readable);
 
                 _read_pending = true;
@@ -242,6 +244,8 @@ protected:
                             std::chrono::seconds((_timeout >> 1) + 1);
                 }
 
+                // note that this is tipically a reentrant call, i.e. may block until the whole
+                // frame was sent (this will increase the shared_from_this().use_count()
                 connection->process(fd, AMQP::writable);
 
                 _write_pending = true;
@@ -353,13 +357,17 @@ protected:
         Watcher(const Watcher &that) = delete;
 
         /**
-         *  Destructor
+         *  Destructors
          */
-        ~Watcher()
+        void release_all()
         {
+            // release ownership of filedescriptor and cancel pending io callbacks
             _socket.release();
+            // cancel any pending callback waiting on the timer
             stop_timer();
         }
+
+        ~Watcher() { release_all(); }
 
         /**
          *  Change the events for which the filedescriptor is monitored
@@ -517,6 +525,10 @@ protected:
         {
             // the watcher does not need anymore, unregister
             _watchers.erase(iter);
+
+            // have to release the filedescriptor immediately, cannot rely on the
+            // dtor for that since must wait for all the callback to terminate
+            iter->second->release_all();
         }
         else
         {
