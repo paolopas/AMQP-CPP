@@ -208,11 +208,13 @@ protected:
                 // frame was received (this will increase the shared_from_this().use_count()
                 connection->process(fd, AMQP::readable);
 
-                _read_pending = true;
+                if (_socket.is_open()) {
+                    _read_pending = true;
 
-                _socket.async_wait(
-                    boost::asio::posix::stream_descriptor::wait_read,
-                    get_read_handler(connection, fd));
+                    _socket.async_wait(
+                        boost::asio::posix::stream_descriptor::wait_read,
+                        get_read_handler(connection, fd));
+                }
             }
         }
         /**
@@ -248,11 +250,13 @@ protected:
                 // frame was sent (this will increase the shared_from_this().use_count()
                 connection->process(fd, AMQP::writable);
 
-                _write_pending = true;
+                if (_socket.is_open()) {
+                    _write_pending = true;
 
-                _socket.async_wait(
-                    boost::asio::posix::stream_descriptor::wait_write,
-                    get_write_handler(connection, fd));
+                    _socket.async_wait(
+                        boost::asio::posix::stream_descriptor::wait_write,
+                        get_write_handler(connection, fd));
+                }
             }
         }
         /**
