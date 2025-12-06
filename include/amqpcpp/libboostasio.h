@@ -204,8 +204,6 @@ protected:
                             std::chrono::seconds((_timeout >> 1) + _timeout + 1);
                 }
 
-                // note that this is tipically a reentrant call, it blocks until the whole
-                // frame was received (this will increase the shared_from_this().use_count())
                 connection->process(fd, AMQP::readable);
 
                 if (_socket.is_open())
@@ -247,8 +245,6 @@ protected:
                             std::chrono::seconds((_timeout >> 1) + 1);
                 }
 
-                // note that this is tipically a reentrant call, it blocks until the whole
-                // frame was sent (this will increase the shared_from_this().use_count())
                 connection->process(fd, AMQP::writable);
 
                 if (_socket.is_open())
@@ -329,8 +325,8 @@ protected:
             return make_handler(std::mem_fn(&Watcher::timer_handler), connection, fd);
         }
 
-
     public:
+
         /**
          *  Constructor - initialises the watcher and assigns the filedescriptor to
          *  a boost socket for monitoring.
@@ -544,6 +540,7 @@ protected:
     }
 
 protected:
+
     /**
      *  Method that is called when the heartbeat timeout is negotiated between the server and the client.
      *  @param  connection      The connection that suggested a heartbeat timeout
