@@ -204,11 +204,12 @@ protected:
                             std::chrono::seconds((_timeout >> 1) + _timeout + 1);
                 }
 
-                // note that this is tipically a reentrant call, i.e. may block until the whole
-                // frame was received (this will increase the shared_from_this().use_count()
+                // note that this is tipically a reentrant call, it blocks until the whole
+                // frame was received (this will increase the shared_from_this().use_count())
                 connection->process(fd, AMQP::readable);
 
-                if (_socket.is_open()) {
+                if (_socket.is_open())
+                {
                     _read_pending = true;
 
                     _socket.async_wait(
@@ -246,11 +247,12 @@ protected:
                             std::chrono::seconds((_timeout >> 1) + 1);
                 }
 
-                // note that this is tipically a reentrant call, i.e. may block until the whole
-                // frame was sent (this will increase the shared_from_this().use_count()
+                // note that this is tipically a reentrant call, it blocks until the whole
+                // frame was sent (this will increase the shared_from_this().use_count())
                 connection->process(fd, AMQP::writable);
 
-                if (_socket.is_open()) {
+                if (_socket.is_open())
+                {
                     _write_pending = true;
 
                     _socket.async_wait(
