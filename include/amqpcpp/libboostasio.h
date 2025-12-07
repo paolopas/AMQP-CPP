@@ -110,28 +110,34 @@ protected:
         steady_time_point _expire;
 
         /**
+         *  The events for which the socket filedescriptor is actually monitored.
+         *  @var int
+         */
+        int _events = 0;
+
+        /**
          *  A boolean that indicates if the watcher is monitoring for read events.
          *  @var _read True if reads are being monitored else false.
          */
-        bool _read{false};
+        bool _read = false;
 
         /**
          *  A boolean that indicates if the watcher has a pending read event.
          *  @var _read_pending True if read is pending else false.
          */
-        bool _read_pending{false};
+        bool _read_pending = false;
 
         /**
          *  A boolean that indicates if the watcher is monitoring for write events.
          *  @var _write True if writes are being monitored else false.
          */
-        bool _write{false};
+        bool _write = false;
 
         /**
          *  A boolean that indicates if the watcher has a pending write event.
          *  @var _write_pending True if read is pending else false.
          */
-        bool _write_pending{false};
+        bool _write_pending = false;
 
         using handler_cb = std::function<void(boost::system::error_code)>;
 
@@ -374,32 +380,37 @@ protected:
          */
         void events(TcpConnection *const connection, int fd, int events)
         {
-            // 1. Handle reads?
-            bool old_read = _read;
-            _read = ((events & AMQP::readable) != 0);
-
-            // Read requested but no read pending?
-            if (_read && ((_read != old_read) || !_read_pending))
+            if (events != _events)
             {
-                _read_pending = true;
+                // cancel pending io callback
+                _socket.cancel();
 
-                _socket.async_wait(
-                    boost::asio::posix::stream_descriptor::wait_read,
-                    get_read_handler(connection, fd));
-            }
+                // handle reads?
+                _read = ((events & AMQP::readable) != 0);
 
-            // 2. Handle writes?
-            bool old_write = _write;
-            _write = ((events & AMQP::writable) != 0);
+                if (_read)
+                {
+                    _read_pending = true;
 
-            // Write requested but no write pending?
-            if (_write && ((_write != old_write) || !_write_pending))
-            {
-                _write_pending = true;
+                    _socket.async_wait(
+                        boost::asio::posix::stream_descriptor::wait_read,
+                        get_read_handler(connection, fd));
+                }
 
-                _socket.async_wait(
-                    boost::asio::posix::stream_descriptor::wait_write,
-                    get_write_handler(connection, fd));
+                // handle writes?
+                _write = ((events & AMQP::writable) != 0);
+
+                if (_write)
+                {
+                    _write_pending = true;
+
+                    _socket.async_wait(
+                        boost::asio::posix::stream_descriptor::wait_write,
+                        get_write_handler(connection, fd));
+                }
+
+                // remember current events
+                _events = events;
             }
         }
 
