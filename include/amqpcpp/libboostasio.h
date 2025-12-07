@@ -199,13 +199,14 @@ protected:
             {
                 if (_timeout)
                 {
-                    // the server has just sent us some data, update the _expire time
+                    // the server is sending data, update the _expire time
                     _expire = std::chrono::steady_clock::now() +
-                            std::chrono::seconds((_timeout >> 1) + _timeout + 1);
+                            std::chrono::seconds(_timeout + (_timeout >> 1) + 1);
                 }
 
                 connection->process(fd, AMQP::readable);
 
+                // still we need monitoring read?
                 if (_socket.is_open())
                 {
                     _read_pending = true;
@@ -247,6 +248,7 @@ protected:
 
                 connection->process(fd, AMQP::writable);
 
+                // still we need monitoring write?
                 if (_socket.is_open())
                 {
                     _write_pending = true;
@@ -361,7 +363,7 @@ protected:
         /**
          *  Destructors
          */
-        void release_all()
+        void close()
         {
             // release ownership of filedescriptor and cancel pending io callbacks
             _socket.release();
@@ -369,7 +371,7 @@ protected:
             stop_timer();
         }
 
-        ~Watcher() { release_all(); }
+        ~Watcher() { close(); }
 
         /**
          *  Change the events for which the filedescriptor is monitored
@@ -530,7 +532,7 @@ protected:
 
             // have to release the filedescriptor immediately, cannot rely on the
             // dtor for that since must wait for all the callback to terminate
-            iter->second->release_all();
+            iter->second->close();
         }
         else
         {
