@@ -57,12 +57,6 @@ protected:
     {
     private:
 
-        /**
-         *  The boost asio io_context which is responsible for detecting events.
-         *  @var class boost::asio::io_context&
-         */
-        boost::asio::io_context & _iocontext;
-
         using strand_weak_ptr = std::weak_ptr<boost::asio::io_context::strand>;
 
         /**
@@ -341,11 +335,10 @@ protected:
                 const strand_weak_ptr wpstrand,
                 const int fd,
                 uint16_t connection_timeout) :
-            _iocontext(io_context),
             _wpstrand(wpstrand),
             _socket(io_context),
-            _connection_timeout(connection_timeout),
-            _timer(io_context)
+            _timer(io_context),
+            _connection_timeout(connection_timeout)
         {
             _socket.assign(fd);
 
