@@ -375,10 +375,11 @@ protected:
         void events(TcpConnection *const connection, int fd, int events)
         {
             // 1. Handle reads?
+            bool old_read = _read;
             _read = ((events & AMQP::readable) != 0);
 
             // Read requested but no read pending?
-            if (_read && !_read_pending)
+            if (_read && (_read != old_read) && !_read_pending)
             {
                 _read_pending = true;
 
@@ -388,10 +389,11 @@ protected:
             }
 
             // 2. Handle writes?
+            bool old_write = _write;
             _write = ((events & AMQP::writable) != 0);
 
             // Write requested but no write pending?
-            if (_write && !_write_pending)
+            if (_write && (_write != old_write) && !_write_pending)
             {
                 _write_pending = true;
 
