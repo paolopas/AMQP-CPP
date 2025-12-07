@@ -379,7 +379,7 @@ protected:
             _read = ((events & AMQP::readable) != 0);
 
             // Read requested but no read pending?
-            if (_read && (_read != old_read) && !_read_pending)
+            if (_read && ((_read != old_read) || !_read_pending))
             {
                 _read_pending = true;
 
@@ -393,7 +393,7 @@ protected:
             _write = ((events & AMQP::writable) != 0);
 
             // Write requested but no write pending?
-            if (_write && (_write != old_write) && !_write_pending)
+            if (_write && ((_write != old_write) || !_write_pending))
             {
                 _write_pending = true;
 
