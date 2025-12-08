@@ -115,7 +115,6 @@ protected:
 
         using handler_cb = boost::function<void(boost::system::error_code)>;
         using io_handler = boost::function<void(const boost::system::error_code&)>;
-        using timer_cb = boost::function<void(boost::system::error_code)>;
 
         /**
          * Builds a io handler callback that executes the io callback in a strand.
@@ -129,12 +128,10 @@ protected:
             return [fn, wpstrand](const boost::system::error_code &ec)
             {
                 const strand_shared_ptr strand = wpstrand.lock();
-                if (!strand)
-                {
-                    fn(boost::system::errc::make_error_code(boost::system::errc::operation_canceled));
-                    return;
-                }
-                boost::asio::dispatch(strand->context().get_executor(), boost::bind(fn, ec));
+                // is the strand still here?
+                if (!strand) return;
+
+                boost::asio::dispatch(*strand, boost::bind(fn, ec));
             };
         }
 
@@ -178,7 +175,7 @@ protected:
          * @param  timeout      The file descripter being watched.
          * @return handler callback
          */
-        timer_cb get_timer_handler(TcpConnection *const connection, const uint16_t timeout)
+        handler_cb get_timer_handler(TcpConnection *const connection, const uint16_t timeout)
         {
             const auto fn = boost::bind(&Watcher::timeout_handler,
                                   this,
@@ -186,19 +183,7 @@ protected:
                                   PTR_FROM_THIS(Watcher),
                                   connection,
                                   timeout);
-
-            const strand_weak_ptr wpstrand = _wpstrand;
-
-            return [fn, wpstrand](const boost::system::error_code &ec)
-            {
-                const strand_shared_ptr strand = wpstrand.lock();
-                if (!strand)
-                {
-                    fn(boost::system::errc::make_error_code(boost::system::errc::operation_canceled));
-                    return;
-                }
-                boost::asio::dispatch(strand->context().get_executor(), boost::bind(fn, ec));
-            };
+            return get_dispatch_wrapper(fn);
         }
 
         /**
