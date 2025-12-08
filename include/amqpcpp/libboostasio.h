@@ -23,10 +23,11 @@
  *  Dependencies
  */
 #include <memory>
+#include <chrono>
 
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/io_context_strand.hpp>
-#include <boost/asio/deadline_timer.hpp>
+#include <boost/asio/steady_timer.hpp>
 #include <boost/asio/posix/stream_descriptor.hpp>
 #include <boost/asio/dispatch.hpp>
 #include <boost/bind/bind.hpp>
@@ -83,10 +84,10 @@ protected:
         boost::asio::posix::stream_descriptor _socket;
 
         /**
-         *  The boost asynchronous deadline timer.
-         *  @var class boost::asio::deadline_timer
+         *  The boost asynchronous timer.
+         *  @var boost::asio::steady_timer
          */
-        boost::asio::deadline_timer _timer;
+        boost::asio::steady_timer _timer;
 
         /**
          *  A boolean that indicates if the watcher is monitoring for read events.
@@ -295,8 +296,8 @@ protected:
                     connection->heartbeat();
                 }
 
-                // Reschedule the timer for the future:
-                _timer.expires_at(_timer.expires_at() + boost::posix_time::seconds(timeout));
+                // reschedule the timer
+                _timer.expires_after(std::chrono::seconds(timeout));
 
                 // Posts the timer event
                 _timer.async_wait(get_timer_handler(connection, timeout));
@@ -387,11 +388,14 @@ protected:
             // stop timer in case it was already set
             stop_timer();
 
-            // Reschedule the timer for the future:
-            _timer.expires_from_now(boost::posix_time::seconds(timeout));
+            if (timeout)
+            {
+                // schedule the timer
+                _timer.expires_after(std::chrono::seconds(timeout));
 
-            // Posts the timer event
-            _timer.async_wait(get_timer_handler(connection, timeout));
+                // Posts the timer event
+                _timer.async_wait(get_timer_handler(connection, timeout));
+            }
         }
 
         /**
@@ -503,9 +507,7 @@ public:
     explicit LibBoostAsioHandler(boost::asio::io_context &io_context) :
         _iocontext(io_context),
         _strand(std::make_shared<boost::asio::io_context::strand>(_iocontext))
-        //_timer(std::make_shared<Timer>(_iocontext,_strand))
     {
-
     }
 
     /**
