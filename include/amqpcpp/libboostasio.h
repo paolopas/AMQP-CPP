@@ -113,9 +113,9 @@ protected:
          */
         bool _write_pending = false;
 
-        using handler_cb = boost::function<void(boost::system::error_code,std::size_t)>;
-        using io_handler = boost::function<void(const boost::system::error_code&, const std::size_t)>;
-        using timer_handler = boost::function<void(boost::system::error_code)>;
+        using handler_cb = boost::function<void(boost::system::error_code)>;
+        using io_handler = boost::function<void(const boost::system::error_code&)>;
+        using timer_cb = boost::function<void(boost::system::error_code)>;
 
         /**
          * Builds a io handler callback that executes the io callback in a strand.
@@ -126,15 +126,15 @@ protected:
         {
             const strand_weak_ptr wpstrand = _wpstrand;
 
-            return [fn, wpstrand](const boost::system::error_code &ec, const std::size_t bytes_transferred)
+            return [fn, wpstrand](const boost::system::error_code &ec)
             {
                 const strand_shared_ptr strand = wpstrand.lock();
                 if (!strand)
                 {
-                    fn(boost::system::errc::make_error_code(boost::system::errc::operation_canceled), std::size_t{0});
+                    fn(boost::system::errc::make_error_code(boost::system::errc::operation_canceled));
                     return;
                 }
-                boost::asio::dispatch(strand->context().get_executor(), boost::bind(fn, ec, bytes_transferred));
+                boost::asio::dispatch(strand->context().get_executor(), boost::bind(fn, ec));
             };
         }
 
@@ -149,7 +149,6 @@ protected:
             auto fn = boost::bind(&Watcher::read_handler,
                                   this,
                                   boost::placeholders::_1,
-                                  boost::placeholders::_2,
                                   PTR_FROM_THIS(Watcher),
                                   connection,
                                   fd);
@@ -167,7 +166,6 @@ protected:
             auto fn = boost::bind(&Watcher::write_handler,
                                   this,
                                   boost::placeholders::_1,
-                                  boost::placeholders::_2,
                                   PTR_FROM_THIS(Watcher),
                                   connection,
                                   fd);
@@ -180,7 +178,7 @@ protected:
          * @param  timeout      The file descripter being watched.
          * @return handler callback
          */
-        timer_handler get_timer_handler(TcpConnection *const connection, const uint16_t timeout)
+        timer_cb get_timer_handler(TcpConnection *const connection, const uint16_t timeout)
         {
             const auto fn = boost::bind(&Watcher::timeout_handler,
                                   this,
@@ -206,14 +204,12 @@ protected:
         /**
          *  Handler method that is called by boost's io_context when the socket pumps a read event.
          *  @param  ec          The status of the callback.
-         *  @param  bytes_transferred The number of bytes transferred.
          *  @param  awpWatcher  A weak pointer to this object.
          *  @param  connection  The connection being watched.
          *  @param  fd          The file descriptor being watched.
          *  @note   The handler will get called if a read is cancelled.
          */
         void read_handler(const boost::system::error_code &ec,
-                          const std::size_t bytes_transferred,
                           const std::weak_ptr<Watcher> awpWatcher,
                           TcpConnection *const connection,
                           const int fd)
@@ -225,29 +221,31 @@ protected:
 
             _read_pending = false;
 
-            if ((!ec || ec == boost::asio::error::would_block) && _read)
+            if (!ec && _read)
             {
                 connection->process(fd, AMQP::readable);
 
-                _read_pending = true;
+                // still we need monitoring read?
+                if (_socket.is_open())
+                {
+                    _read_pending = true;
 
-                _socket.async_read_some(
-                    boost::asio::null_buffers(),
-                    get_read_handler(connection, fd));
+                    _socket.async_wait(
+                        boost::asio::posix::stream_descriptor::wait_read,
+                        get_read_handler(connection, fd));
+                }
             }
         }
 
         /**
          *  Handler method that is called by boost's io_context when the socket pumps a write event.
          *  @param  ec          The status of the callback.
-         *  @param  bytes_transferred The number of bytes transferred.
          *  @param  awpWatcher  A weak pointer to this object.
          *  @param  connection  The connection being watched.
          *  @param  fd          The file descriptor being watched.
          *  @note   The handler will get called if a write is cancelled.
          */
         void write_handler(const boost::system::error_code ec,
-                           const std::size_t bytes_transferred,
                            const std::weak_ptr<Watcher> awpWatcher,
                            TcpConnection *const connection,
                            const int fd)
@@ -259,15 +257,19 @@ protected:
 
             _write_pending = false;
 
-            if ((!ec || ec == boost::asio::error::would_block) && _write)
+            if (!ec && _write)
             {
                 connection->process(fd, AMQP::writable);
 
-                _write_pending = true;
+                // still we need monitoring write?
+                if (_socket.is_open())
+                {
+                    _write_pending = true;
 
-                _socket.async_write_some(
-                    boost::asio::null_buffers(),
-                    get_write_handler(connection, fd));
+                    _socket.async_wait(
+                        boost::asio::posix::stream_descriptor::wait_write,
+                        get_write_handler(connection, fd));
+                }
             }
         }
 
@@ -277,6 +279,7 @@ protected:
          *  @param  loop        The loop in which the event was triggered
          *  @param  connection
          *  @param  timeout
+         *  @note   The handler will get called if a timer is cancelled.
          */
         void timeout_handler(const boost::system::error_code &ec,
                      std::weak_ptr<Watcher> awpThis,
@@ -359,8 +362,8 @@ protected:
             {
                 _read_pending = true;
 
-                _socket.async_read_some(
-                    boost::asio::null_buffers(),
+                _socket.async_wait(
+                    boost::asio::posix::stream_descriptor::wait_read,
                     get_read_handler(connection, fd));
             }
 
@@ -372,8 +375,8 @@ protected:
             {
                 _write_pending = true;
 
-                _socket.async_write_some(
-                    boost::asio::null_buffers(),
+                _socket.async_wait(
+                    boost::asio::posix::stream_descriptor::wait_write,
                     get_write_handler(connection, fd));
             }
         }
