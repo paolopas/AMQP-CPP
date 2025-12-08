@@ -170,7 +170,7 @@ to RabbitMQ has to be set up.
 
 An example compilation command for an application using the TCP module:
 ```bash
-g++ -g -Wall -lamqcpp -lpthread -ldl my-amqp-cpp.c -o my-amqp-cpp
+g++ -std=c++17 -g -Wall -lamqcpp -lpthread -ldl my-amqp-cpp.c -o my-amqp-cpp
 ```
 
 HOW TO USE AMQP-CPP
@@ -710,7 +710,7 @@ it has a couple of open issues.
 
 | TCP Handler Impl        | Header File Location   |  Sample File Location     |
 | ----------------------- | ---------------------- | ------------------------- |
-| Boost asio (io_service) | include/libboostasio.h | examples/libboostasio.cpp |  
+| Boost asio              | include/libboostasio.h | examples/libboostasio.cpp |
 | libev                   | include/libev.h        | examples/libev.cpp        |
 | libevent                | include/libevent.h     | examples/libevent.cpp     |
 | libuv                   | include/libuv.h        | examples/libuv.cpp        |
@@ -770,7 +770,7 @@ class MyTcpHandler : public AMQP::TcpHandler
 ````
 
 If you enable heartbeats, it is your own responsibility to ensure that the
-```connection->heartbeat()``` method is called at least once during this period,
+`connection->heartbeat()` method is called at least once during this period,
 or that you call one of the other channel or connection methods to send data
 over the connection. Heartbeats are sent by the server too, RabbitMQ also ensures
 that _some data_ is sent over the connection from the server to the client 

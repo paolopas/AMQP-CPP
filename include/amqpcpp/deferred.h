@@ -178,7 +178,7 @@ protected:
         // store pointer
         _next = deferred;
     }
-    
+
     /**
      *  Remove this object from the chain of deferreds
      */
@@ -281,9 +281,6 @@ public:
      *  if and when the operation completes
      *  or fails. This function will be called
      *  either way.
-     *
-     *  In the case of success, the provided
-     *  error parameter will be an empty string.
      *
      *  Only one callback can be registered at at time.
      *  Successive calls to this function will clear

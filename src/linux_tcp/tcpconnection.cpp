@@ -27,7 +27,7 @@ namespace AMQP {
 TcpConnection::TcpConnection(TcpHandler *handler, const Address &address) :
     _handler(handler),
     _state(new TcpResolver(this, address.hostname(), address.port(), address.secure(), address.option("connectTimeout", 5), ConnectionOrder(address.option("connectionOrder")))),
-    _connection(this, address.login(), address.vhost()) 
+    _connection(this, address.login(), address.vhost())
 {
     // tell the handler
     _handler->onAttached(this);
@@ -97,8 +97,8 @@ void TcpConnection::process(int fd, int flags)
 
     // remember the old state
     auto *oldstate = _state.get();
-        
-    // pass on the the state, that returns a new impl
+
+    // pass on the state, that returns a new impl
     auto *newstate = _state->process(monitor, fd, flags);
 
     // if the state did not change, we do not have to update a member,
@@ -109,7 +109,7 @@ void TcpConnection::process(int fd, int flags)
     // wrap the new state in a unique-ptr so that so that the old state
     // is not destructed before the new one is assigned
     std::unique_ptr<TcpState> ptr(newstate);
-    
+
     // swap the two pointers (this ensures that the last operation of this
     // method is to destruct the old state, which possible results in calls
     // to user-space and the destruction of "this"
@@ -118,7 +118,7 @@ void TcpConnection::process(int fd, int flags)
 }
 
 /**
- *  Close the connection. 
+ *  Close the connection.
  *  Warning: this potentially directly calls several handlers (onError, onLost, onDetached)
  *  @return bool
  */
@@ -129,10 +129,10 @@ bool TcpConnection::close(bool immediate)
 
     // failing the connection could destruct "this"
     Monitor monitor(this);
-    
+
     // fail the connection / report the error to user-space
     bool failed = _connection.fail("connection prematurely closed by client");
-    
+
     // stop if object was destructed
     if (!monitor.valid()) return true;
 
@@ -142,7 +142,7 @@ bool TcpConnection::close(bool immediate)
     // stop if object was destructed
     if (!monitor.valid()) return true;
 
-    // also call the lost handler, we have now lost the connection from this state (since we force-closed). 
+    // also call the lost handler, we have now lost the connection from this state (since we force-closed).
     // this makes sure the onLost and onDetached is properly called.
     onLost(_state.get());
 
@@ -157,7 +157,7 @@ bool TcpConnection::close(bool immediate)
 }
 
 /**
- *  Method that is called when the RabbitMQ server and your client application  
+ *  Method that is called when the RabbitMQ server and your client application
  *  exchange some properties that describe their identity.
  *  @param  connection      The connection about which information is exchanged
  *  @param  server          Properties sent by the server
@@ -179,7 +179,7 @@ uint16_t TcpConnection::onNegotiate(Connection *connection, uint16_t interval)
 {
     // tell the max-frame size
     _state->maxframe(connection->maxFrame());
-    
+
     // tell the handler
     return _handler ? _handler->onNegotiate(this, interval) : interval;
 }
@@ -205,13 +205,13 @@ void TcpConnection::onError(Connection *connection, const char *message)
 {
     // monitor to check if "this" is destructed
     Monitor monitor(this);
-    
+
     // tell this to the user
     if (_handler) _handler->onError(this, message);
-    
+
     // object could be destructed by user-space
     if (!monitor.valid()) return;
-    
+
     // tell the state that the connection should be closed asap
     _state->close();
 }
@@ -224,7 +224,7 @@ void TcpConnection::onClosed(Connection *connection)
 {
     // tell the state that the connection should be closed asap
     _state->close();
-    
+
     // report to the handler
     _handler->onClosed(this);
 }
@@ -242,10 +242,10 @@ void TcpConnection::onError(TcpState *state, const char *message, bool connected
 
     // monitor to check if all operations are active
     Monitor monitor(this);
-    
+
     // if there are still pending operations, they should be reported as error
     bool failed = _connection.fail(message);
-    
+
     // stop if object was destructed
     if (!monitor.valid()) return;
 
@@ -255,7 +255,7 @@ void TcpConnection::onError(TcpState *state, const char *message, bool connected
     // if the object is still connected, we only have to report the error and
     // we wait for the subsequent call to the onLost() method
     if (connected || !monitor.valid()) return;
-    
+
     // tell the handler that no further events will be fired
     _handler->onDetached(this);
 }
@@ -268,16 +268,16 @@ void TcpConnection::onLost(TcpState *state)
 {
     // if user-space is no longer interested in this object, the rest of the code is pointless here
     if (_handler == nullptr) return;
-    
+
     // monitor to check if "this" is destructed
     Monitor monitor(this);
-    
+
     // tell the handler
     _handler->onLost(this);
-    
+
     // leap out if object was destructed
     if (!monitor.valid()) return;
-    
+
     // tell the handler that no further events will be fired
     _handler->onDetached(this);
 }
