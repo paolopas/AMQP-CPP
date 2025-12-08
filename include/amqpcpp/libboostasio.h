@@ -1,11 +1,11 @@
 /**
  *  LibBoostAsio.h
  *
- *  Implementation for the AMQP::TcpHandler for boost::asio. You can use this class 
- *  instead of a AMQP::TcpHandler class, just pass the boost asio service to the 
+ *  Implementation for the AMQP::TcpHandler for boost::asio. You can use this class
+ *  instead of a AMQP::TcpHandler class, just pass the boost asio service to the
  *  constructor and you're all set.  See tests/libboostasio.cpp for example.
  *
- *  Watch out: this class was not implemented or reviewed by the original author of 
+ *  Watch out: this class was not implemented or reviewed by the original author of
  *  AMQP-CPP. However, we do get a lot of questions and issues from users of this class,
  *  so we cannot guarantee its quality. If you run into such issues too, it might be
  *  better to implement your own handler that interact with boost.
@@ -13,7 +13,6 @@
  *
  *  @author Gavin Smith <gavin.smith@coralbay.tv>
  */
-
 
 /**
  *  Include guard
@@ -26,7 +25,7 @@
 #include <memory>
 
 #include <boost/asio/io_context.hpp>
-#include <boost/asio/strand.hpp>
+#include <boost/asio/io_context_strand.hpp>
 #include <boost/asio/deadline_timer.hpp>
 #include <boost/asio/posix/stream_descriptor.hpp>
 #include <boost/asio/dispatch.hpp>
@@ -72,7 +71,7 @@ protected:
 
         /**
          *  The boost asio io_context::strand managed pointer.
-         *  @var class std::shared_ptr<boost::asio::io_context>
+         *  @var std::weak_ptr<boost::asio::io_context::strand>
          */
         strand_weak_ptr _wpstrand;
 
@@ -93,25 +92,25 @@ protected:
          *  A boolean that indicates if the watcher is monitoring for read events.
          *  @var _read True if reads are being monitored else false.
          */
-        bool _read{false};
+        bool _read = false;
 
         /**
          *  A boolean that indicates if the watcher has a pending read event.
-         *  @var _read True if read is pending else false.
+         *  @var _read_pending True if read is pending else false.
          */
-        bool _read_pending{false};
+        bool _read_pending = false;
 
         /**
          *  A boolean that indicates if the watcher is monitoring for write events.
-         *  @var _read True if writes are being monitored else false.
+         *  @var _write True if writes are being monitored else false.
          */
-        bool _write{false};
+        bool _write = false;
 
         /**
          *  A boolean that indicates if the watcher has a pending write event.
-         *  @var _read True if read is pending else false.
+         *  @var _write_pending True if read is pending else false.
          */
-        bool _write_pending{false};
+        bool _write_pending = false;
 
         using handler_cb = boost::function<void(boost::system::error_code,std::size_t)>;
         using io_handler = boost::function<void(const boost::system::error_code&, const std::size_t)>;
@@ -305,6 +304,7 @@ protected:
         }
 
     public:
+
         /**
          *  Constructor- initialises the watcher and assigns the filedescriptor to
          *  a boost socket for monitoring.
@@ -414,13 +414,13 @@ protected:
 
     /**
      *  The boost asio io_context::strand managed pointer.
-     *  @var class std::shared_ptr<boost::asio::io_context>
+     *  @var std::shared_ptr<boost::asio::io_context::strand>
      */
     strand_shared_ptr _strand;
 
     /**
-     *  All I/O watchers that are active, indexed by their filedescriptor
-     *  @var std::map<int,Watcher>
+     *  Active I/O watchers, indexed by their filedescriptor.
+     *  @var std::map<int, Watcher>
      */
     std::map<int, std::shared_ptr<Watcher> > _watchers;
 
@@ -460,11 +460,12 @@ protected:
         else
         {
             // Change the events on which to act.
-            iter->second->events(connection,fd,flags);
+            iter->second->events(connection, fd, flags);
         }
     }
 
 protected:
+
     /**
      *  Method that is called when the heartbeat frequency is negotiated between the server and the client.
      *  @param  connection      The connection that suggested a heartbeat interval
@@ -492,8 +493,6 @@ public:
 
     /**
      *  Handler cannot be default constructed.
-     *
-     *  @param  that    The object to not move or copy
      */
     LibBoostAsioHandler() = delete;
 
@@ -531,7 +530,6 @@ public:
      */
     ~LibBoostAsioHandler() override = default;
 };
-
 
 /**
  *  End of namespace
