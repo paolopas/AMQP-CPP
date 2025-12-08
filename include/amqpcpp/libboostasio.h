@@ -2,8 +2,8 @@
  *  LibBoostAsio.h
  *
  *  Implementation for the AMQP::TcpHandler for boost::asio. You can use this class
- *  instead of a AMQP::TcpHandler class, just pass the boost asio service to the
- *  constructor and you're all set.  See tests/libboostasio.cpp for example.
+ *  instead of a AMQP::TcpHandler class, just pass the boost asio io_context to the
+ *  constructor and you're all set.  See examples/libboostasio.cpp for an example.
  *
  *  Watch out: this class was not implemented or reviewed by the original author of
  *  AMQP-CPP. However, we do get a lot of questions and issues from users of this class,
@@ -50,14 +50,14 @@ namespace AMQP {
  *  Class definition
  *  @note Because of a limitation on Windows, this will only work on POSIX based systems - see https://github.com/chriskohlhoff/asio/issues/70
  */
-class LibBoostAsioHandler : public virtual TcpHandler
+class LibBoostAsioHandler : public TcpHandler
 {
 protected:
 
     /**
      *  Helper class that wraps a boost io_context socket monitor.
      */
-    class Watcher : public virtual std::enable_shared_from_this<Watcher>
+    class Watcher : public std::enable_shared_from_this<Watcher>
     {
     private:
 
