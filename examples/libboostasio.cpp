@@ -1,7 +1,7 @@
 /**
  *  LibBoostAsio.cpp
  *
- *  Test program to check AMQP functionality based on Boost's asio io_service.
+ *  Test program to check AMQP functionality based on Boost's asio io_context.
  *
  *  @author Gavin Smith <gavin.smith@coralbay.tv>
  *

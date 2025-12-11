@@ -64,7 +64,7 @@ protected:
 
         /**
          *  The boost asio io_context which is responsible for detecting events.
-         *  @var class boost::asio::io_context&
+         *  @var boost::asio::io_context&
          */
         boost::asio::io_context & _iocontext;
 
@@ -329,7 +329,9 @@ protected:
         {
             _read = false;
             _write = false;
+            // release ownership of filedescriptor and cancel pending io callbacks
             _socket.release();
+            // cancel any pending timer callback
             stop_timer();
         }
 
