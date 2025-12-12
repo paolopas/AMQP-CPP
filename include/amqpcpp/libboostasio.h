@@ -78,16 +78,40 @@ protected:
 
         /**
          *  The boost asynchronous timer.
+         *
+         *  Used for monitoring of both server connection timeout condition
+         *  (at initial connection stage) and heartbeat (client and server).
          *  @var boost::asio::steady_timer
          */
         boost::asio::steady_timer _timer;
 
         /**
+         *  AMQP Server connection timeout setting (seconds).
+         *  @var uint16_t
+         */
+        uint16_t _connection_timeout = 0;
+
+        /**
          *  Timeout after which the connection is no longer considered alive.
+         *  A heartbeat must be sent every _timeout / 2 seconds.
          *  Value zero means heartbeats are disabled, or not yet negotiated.
          *  @var uint16_t
          */
         uint16_t _timeout = 0;
+
+        using steady_time_point = std::chrono::time_point<std::chrono::steady_clock>;
+
+        /**
+         *  When should we send the next heartbeat?
+         *  @var std::chrono::time_point<std::chrono::steady_clock>
+         */
+        steady_time_point _next;
+
+        /**
+         *  When does the connection expire / was the server idle for too long?
+         *  @var std::chrono::time_point<std::chrono::steady_clock>
+         */
+        steady_time_point _expire;
 
         /**
          *  A boolean that indicates if the watcher is monitoring for read events.
@@ -172,6 +196,13 @@ protected:
 
             if (!ec && _read)
             {
+                if (_timeout)
+                {
+                    // the server is sending data, update the _expire time
+                    _expire = std::chrono::steady_clock::now() +
+                            std::chrono::seconds(_timeout + (_timeout >> 1) + 1);
+                }
+
                 connection->process(fd, AMQP::readable);
 
                 // still we need monitoring read?
@@ -242,11 +273,41 @@ protected:
         {
             if (!ec && _socket.is_open())
             {
-                // send the heartbeat
-                connection->heartbeat();
+                steady_time_point now = std::chrono::steady_clock::now();
+
+                if (_timeout == 0)
+                {
+                    // this can happen in three situations:
+                    // 1. a connection timeout,
+                    // 2. user space has overidden onNegotiate to reject heartbeats
+                    // 3. AMQP server does not want heartbeats
+                    // in either case we're no longer going to run further timers.
+
+                    // if we have an initialized connection, user space must have overidden
+                    // the onNegotiate method, so we keep using the connection
+                    if (connection->initialized()) return;
+
+                    // this is a connection timeout, close the connection with immediate effect
+                    return (void) connection->close(true);
+                }
+                else if (now >= _expire)
+                {
+                    // the server was inactive for a too long period of time,
+                    // close the connection with immediate effect
+                    _timeout = 0;
+                    return (void) connection->close(true);
+                }
+                else if (now >= _next)
+                {
+                    // send the heartbeat
+                    connection->heartbeat();
+
+                    // when we should send out the next one
+                    _next = now + std::chrono::seconds((_timeout >> 1) + 1);
+                }
 
                 // reschedule the timer
-                _timer.expires_after(std::chrono::seconds(_timeout));
+                _timer.expires_at(_next);
 
                 // Posts the timer event
                 _timer.async_wait(get_timer_handler(connection, fd));
@@ -265,17 +326,20 @@ protected:
         /**
          *  Constructor - initialises the watcher and assigns the filedescriptor to
          *  a boost socket for monitoring.
-         *  @param  io_context      The boost io_context
-         *  @param  wpstrand        A weak pointer to a io_context::strand instance.
-         *  @param  fd              The filedescriptor being watched
+         *  @param  io_context           The boost io_context
+         *  @param  wpstrand             A weak pointer to a io_context::strand instance.
+         *  @param  fd                   The filedescriptor being watched
+         *  @param  connection_timeout   The AMQP server connection timeout
          */
         Watcher(boost::asio::io_context &io_context,
                 const strand_weak_ptr wpstrand,
-                const int fd) :
+                const int fd,
+                uint16_t connection_timeout) :
             _iocontext(io_context),
             _wpstrand(wpstrand),
             _socket(io_context),
-            _timer(io_context)
+            _timer(io_context),
+            _connection_timeout(connection_timeout)
         {
             _socket.assign(fd);
 
@@ -337,6 +401,23 @@ protected:
         }
 
         /**
+         *  Apply AMQP server connection timeout watching.
+         *  @param  connection  The connection being watched.
+         *  @param  fd          The file descripter being watched.
+         */
+        void apply_connection_timeout(TcpConnection *const connection, const int fd)
+        {
+            if (_connection_timeout && !_timeout)
+            {
+                // schedule the timer
+                _timer.expires_after(std::chrono::seconds(_connection_timeout));
+
+                // Posts the timer event
+                _timer.async_wait(get_timer_handler(connection, fd));
+            }
+        }
+
+        /**
          *  Configure the heartbeat interval to use
          *  @param timeout      The timeout value (seconds, 0 to disable heartbeat monitor.)
          */
@@ -357,8 +438,13 @@ protected:
 
             if (_timeout)
             {
+                // when we should send out the next heartbeat
+                _next = std::chrono::steady_clock::now() + std::chrono::seconds((_timeout >> 1) + 1);
+                // by when we should expect some server activity
+                _expire = _next + std::chrono::seconds(_timeout);
+
                 // schedule the timer
-                _timer.expires_after(std::chrono::seconds(_timeout));
+                _timer.expires_at(_next);
 
                 // Posts the timer event
                 _timer.async_wait(get_timer_handler(connection, fd));
@@ -396,6 +482,12 @@ protected:
     std::map<int, std::shared_ptr<Watcher> > _watchers;
 
     /**
+     *  AMQP Server connection timeout setting (seconds).
+     *  @var uint16_t
+     */
+    uint16_t _connection_timeout;
+
+    /**
      *  Method that is called by AMQP-CPP to register a filedescriptor for readability or writability
      *  @param  connection  The TCP connection object that is reporting
      *  @param  fd          The filedescriptor to be monitored
@@ -416,10 +508,13 @@ protected:
 
             // construct a new watcher
             const std::shared_ptr<Watcher> spwatcher =
-                std::make_shared<Watcher>(_iocontext, _strand, fd);
+                std::make_shared<Watcher>(_iocontext, _strand, fd, _connection_timeout);
 
             // register as active
             _watchers[fd] = spwatcher;
+
+            // apply server connection timeout monitor
+            spwatcher->apply_connection_timeout(connection, fd);
 
             // explicitly set the events to monitor
             spwatcher->events(connection, fd, flags);
@@ -475,11 +570,14 @@ public:
 
     /**
      *  Constructor
-     *  @param  io_context    The boost io_context to wrap
+     *  @param  io_context          The boost io_context to wrap
+     *  @param  connection_timeout  The AMQP server connection timeout (seconds)
      */
-    explicit LibBoostAsioHandler(boost::asio::io_context &io_context) :
+    explicit LibBoostAsioHandler(boost::asio::io_context &io_context,
+                                 uint16_t connection_timeout = 60) :
         _iocontext(io_context),
-        _strand(std::make_shared<boost::asio::io_context::strand>(_iocontext))
+        _strand(std::make_shared<boost::asio::io_context::strand>(_iocontext)),
+        _connection_timeout(connection_timeout)
     {
     }
 
