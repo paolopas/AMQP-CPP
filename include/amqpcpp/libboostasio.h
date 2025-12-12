@@ -176,9 +176,9 @@ protected:
                 // still we need monitoring read?
                 if (_socket.is_open())
                 {
-                    _read_pending = true;
-
-                    _socket.async_wait(
+                    _read_pending = true;  // This is a problem waiting to manifest,
+                       /////////////          what if suspended here while more events
+                    _socket.async_wait(    // occurs?  See bottom NOTE
                         boost::asio::posix::stream_descriptor::wait_read,
                         get_read_handler(connection, fd));
                 }
@@ -212,9 +212,9 @@ protected:
                 // still we need monitoring write?
                 if (_socket.is_open())
                 {
-                    _write_pending = true;
-
-                    _socket.async_wait(
+                    _write_pending = true;  // This is a problem waiting to manifest,
+                       /////////////           what if suspended here while more events
+                    _socket.async_wait(     // occurs?  See bottom NOTE
                         boost::asio::posix::stream_descriptor::wait_write,
                         get_write_handler(connection, fd));
                 }
@@ -317,9 +317,9 @@ protected:
             // Read requsted but no read pending?
             if (_read && !_read_pending)
             {
-                _read_pending = true;
-
-                _socket.async_wait(
+                _read_pending = true;  // This is a problem waiting to manifest,
+                   /////////////          what if suspended here while more events
+                _socket.async_wait(    // occurs?  See bottom NOTE
                     boost::asio::posix::stream_descriptor::wait_read,
                     get_read_handler(connection, fd));
             }
@@ -330,9 +330,9 @@ protected:
             // Write requested but no write pending?
             if (_write && !_write_pending)
             {
-                _write_pending = true;
-
-                _socket.async_wait(
+                _write_pending = true;  // This is a problem waiting to manifest,
+                   /////////////           what if suspended here while more events
+                _socket.async_wait(     // occurs?  See bottom NOTE
                     boost::asio::posix::stream_descriptor::wait_write,
                     get_write_handler(connection, fd));
             }
@@ -507,3 +507,32 @@ public:
  *  End of namespace
  */
 }
+/*
+ * NOTE
+ * Regarding the limitations of this handler.
+ *
+ * This handler is inspired by the others that preceded it (i.e. LibEvHandler,
+ * LibEventHandler, LibUvHandler), but the strategy used to monitor the socket
+ * filedescriptor is completely different.  While other handlers rely on calls
+ * like select/poll or similar to be woken up when a filedescriptor becomes
+ * readable/writable, this one uses boost's async_wait.
+ * Since callbacks queued in the execution context are not automatically
+ * requeued once executed, additional work is required to continue monitoring
+ * the socket's readability/writableness.  This is not necessary with the other
+ * approaches, furthermore with select/poll/etc it is the operating system that
+ * checks multiple conditions *simultaneously*, whereas here we are also forced
+ * to manage readable and writeable conditions separately.
+ *
+ * This brings us to the need to use a state machine, which is implemented here
+ * using the boolean flags _read, _read_pending, _write, _write_pending.
+ * As you can see the _pending flags are used to reschedule callbacks, so if
+ * for some reason the thread is suspended after setting the flag but before
+ * rescheduling the callback this can result in missed reads/writes.
+ *
+ * Even though all library callbacks are executed in order on the same strand,
+ * this is YET ANOTHER reason to stick to a single-threaded execution model.
+ *
+ * Anyway I have already fixed this race condition in a future version of the
+ * handler that will do without such flags.
+ *                                                             Paolo
+ */
