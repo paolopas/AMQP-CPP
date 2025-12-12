@@ -24,23 +24,15 @@
  */
 #include <memory>
 #include <chrono>
+#include <functional>
 
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/io_context_strand.hpp>
 #include <boost/asio/steady_timer.hpp>
 #include <boost/asio/posix/stream_descriptor.hpp>
 #include <boost/asio/dispatch.hpp>
-#include <boost/bind/bind.hpp>
-#include <boost/function.hpp>
 
 #include "amqpcpp/linux_tcp.h"
-
-// C++17 has 'weak_from_this()' support.
-#if __cplusplus >= 201701L
-#define PTR_FROM_THIS(T) weak_from_this()
-#else
-#define PTR_FROM_THIS(T) std::weak_ptr<T>(shared_from_this())
-#endif
 
 /**
  *  Set up namespace
@@ -90,6 +82,13 @@ protected:
         boost::asio::steady_timer _timer;
 
         /**
+         *  Timeout after which the connection is no longer considered alive.
+         *  Value zero means heartbeats are disabled, or not yet negotiated.
+         *  @var uint16_t
+         */
+        uint16_t _timeout = 0;
+
+        /**
          *  A boolean that indicates if the watcher is monitoring for read events.
          *  @var _read True if reads are being monitored else false.
          */
@@ -113,97 +112,61 @@ protected:
          */
         bool _write_pending = false;
 
-        using handler_cb = boost::function<void(boost::system::error_code)>;
-        using io_handler = boost::function<void(const boost::system::error_code&)>;
+        using handler_cb = std::function<void(boost::system::error_code)>;
 
         /**
-         * Builds a io handler callback that executes the io callback in a strand.
-         * @param  io_handler  The handler callback to dispatch
-         * @return handler_cb  A function wrapping the execution of the handler function in a io_context::strand.
+         *  Make a generic handler callback.
+         *  @param  mmfn        The wrapping member pointer to be invoked by the handler.
+         *  @param  connection  The connection being watched.
+         *  @param  fd          The file descriptor being watched.
+         *  @return handler_cb
          */
-        handler_cb get_dispatch_wrapper(io_handler fn)
+        template <typename M>
+        handler_cb make_handler(M &&mmfn, TcpConnection *const connection, const int fd)
         {
+#if __cplusplus >= 201701L
+            // C++17 has weak_from_this()
+            std::weak_ptr<Watcher> wpthis = weak_from_this();
+#else
+            std::weak_ptr<Watcher> wpthis(shared_from_this());
+#endif
             const strand_weak_ptr wpstrand = _wpstrand;
 
-            return [fn, wpstrand](const boost::system::error_code &ec)
-            {
-                const strand_shared_ptr strand = wpstrand.lock();
-                // is the strand still here?
-                if (!strand) return;
+            return
+#if __cplusplus >= 201402L
+                // C++14 lambda has init capture
+                [wpthis=std::move(wpthis), wpstrand=std::move(wpstrand), mmfn=std::forward<M>(mmfn),
+                                         connection, fd] (const boost::system::error_code& ec)
+#else
+                [wpthis, wpstrand, mmfn, connection, fd] (const boost::system::error_code& ec)
+#endif
+                {
+                    const std::shared_ptr<Watcher> spwatcher = wpthis.lock();
+                    // is the watcher still here?
+                    if (!spwatcher) return;
 
-                boost::asio::dispatch(*strand, boost::bind(fn, ec));
-            };
-        }
+                    const strand_shared_ptr strand = wpstrand.lock();
+                    // is the strand still here?
+                    if (!strand) return;
 
-        /**
-         * Binds and returns a read handler for the io operation.
-         * @param  connection   The connection being watched.
-         * @param  fd           The file descripter being watched.
-         * @return handler callback
-         */
-        handler_cb get_read_handler(TcpConnection *const connection, const int fd)
-        {
-            auto fn = boost::bind(&Watcher::read_handler,
-                                  this,
-                                  boost::placeholders::_1,
-                                  PTR_FROM_THIS(Watcher),
-                                  connection,
-                                  fd);
-            return get_dispatch_wrapper(fn);
-        }
-
-        /**
-         * Binds and returns a read handler for the io operation.
-         * @param  connection   The connection being watched.
-         * @param  fd           The file descripter being watched.
-         * @return handler callback
-         */
-        handler_cb get_write_handler(TcpConnection *const connection, const int fd)
-        {
-            auto fn = boost::bind(&Watcher::write_handler,
-                                  this,
-                                  boost::placeholders::_1,
-                                  PTR_FROM_THIS(Watcher),
-                                  connection,
-                                  fd);
-            return get_dispatch_wrapper(fn);
-        }
-
-        /**
-         * Binds and returns a lamba function handler for the io operation.
-         * @param  connection   The connection being watched.
-         * @param  timeout      The file descripter being watched.
-         * @return handler callback
-         */
-        handler_cb get_timer_handler(TcpConnection *const connection, const uint16_t timeout)
-        {
-            const auto fn = boost::bind(&Watcher::timeout_handler,
-                                  this,
-                                  boost::placeholders::_1,
-                                  PTR_FROM_THIS(Watcher),
-                                  connection,
-                                  timeout);
-            return get_dispatch_wrapper(fn);
+                    boost::asio::dispatch(*strand,
+                        // moving spwatcher into the bind ensures that the watcher
+                        // will not be destroyed for the duration of the callback
+                        std::bind(std::move(mmfn), std::move(spwatcher), ec, connection, fd));
+                };
         }
 
         /**
          *  Handler method that is called by boost's io_context when the socket pumps a read event.
          *  @param  ec          The status of the callback.
-         *  @param  awpWatcher  A weak pointer to this object.
          *  @param  connection  The connection being watched.
          *  @param  fd          The file descriptor being watched.
          *  @note   The handler will get called if a read is cancelled.
          */
         void read_handler(const boost::system::error_code &ec,
-                          const std::weak_ptr<Watcher> awpWatcher,
                           TcpConnection *const connection,
                           const int fd)
         {
-            // Resolve any potential problems with dangling pointers
-            // (remember we are using async).
-            const std::shared_ptr<Watcher> apWatcher = awpWatcher.lock();
-            if (!apWatcher) { return; }
-
             _read_pending = false;
 
             if (!ec && _read)
@@ -221,25 +184,25 @@ protected:
                 }
             }
         }
+        /**
+         *  Make a handler callback to invoke the read_handler method.
+         */
+        handler_cb get_read_handler(TcpConnection *const connection, const int fd)
+        {
+            return make_handler(std::mem_fn(&Watcher::read_handler), connection, fd);
+        }
 
         /**
          *  Handler method that is called by boost's io_context when the socket pumps a write event.
          *  @param  ec          The status of the callback.
-         *  @param  awpWatcher  A weak pointer to this object.
          *  @param  connection  The connection being watched.
          *  @param  fd          The file descriptor being watched.
          *  @note   The handler will get called if a write is cancelled.
          */
         void write_handler(const boost::system::error_code ec,
-                           const std::weak_ptr<Watcher> awpWatcher,
                            TcpConnection *const connection,
                            const int fd)
         {
-            // Resolve any potential problems with dangling pointers
-            // (remember we are using async).
-            const std::shared_ptr<Watcher> apWatcher = awpWatcher.lock();
-            if (!apWatcher) { return; }
-
             _write_pending = false;
 
             if (!ec && _write)
@@ -257,25 +220,25 @@ protected:
                 }
             }
         }
+        /**
+         *  Make a handler callback to invoke the write_handler method.
+         */
+        handler_cb get_write_handler(TcpConnection *const connection, const int fd)
+        {
+            return make_handler(std::mem_fn(&Watcher::write_handler), connection, fd);
+        }
 
         /**
-         *  Callback method that is called by libev when the timer expires
-         *  @param  ec          error code returned from loop
-         *  @param  loop        The loop in which the event was triggered
-         *  @param  connection
-         *  @param  timeout
+         *  Handler method that is called by boost's io_context when the timer expires.
+         *  @param  ec          The status of the callback.
+         *  @param  connection  The connection being watched.
+         *  @param  fd          The file descriptor being watched.
          *  @note   The handler will get called if a timer is cancelled.
          */
-        void timeout_handler(const boost::system::error_code &ec,
-                     std::weak_ptr<Watcher> awpThis,
-                     TcpConnection *const connection,
-                     const uint16_t timeout)
+        void timer_handler(const boost::system::error_code &ec,
+                           TcpConnection *const connection,
+                           const int fd)
         {
-            // Resolve any potential problems with dangling pointers
-            // (remember we are using async).
-            const std::shared_ptr<Watcher> apTimer = awpThis.lock();
-            if (!apTimer) { return; }
-
             if (!ec)
             {
                 if (connection)
@@ -285,11 +248,18 @@ protected:
                 }
 
                 // reschedule the timer
-                _timer.expires_after(std::chrono::seconds(timeout));
+                _timer.expires_after(std::chrono::seconds(_timeout));
 
                 // Posts the timer event
-                _timer.async_wait(get_timer_handler(connection, timeout));
+                _timer.async_wait(get_timer_handler(connection, fd));
             }
+        }
+        /**
+         *  Make a handler callback to invoke the timer_handler method.
+         */
+        handler_cb get_timer_handler(TcpConnection *const connection, const int fd)
+        {
+            return make_handler(std::mem_fn(&Watcher::timer_handler), connection, fd);
         }
 
     public:
@@ -369,22 +339,31 @@ protected:
         }
 
         /**
-         *  Change the expire time
-         *  @param  connection
-         *  @param  timeout
+         *  Configure the heartbeat interval to use
+         *  @param timeout      The timeout value (seconds, 0 to disable heartbeat monitor.)
          */
-        void set_timer(TcpConnection *connection, uint16_t timeout)
+        void set_heartbeat(uint16_t timeout)
+        {
+            _timeout = timeout;
+        }
+
+        /**
+         *  Schedule the timer
+         *  @param  connection  The connection being watched.
+         *  @param  fd          The file descripter being watched.
+         */
+        void set_timer(TcpConnection *const connection, const int fd)
         {
             // stop timer in case it was already set
             stop_timer();
 
-            if (timeout)
+            if (_timeout)
             {
                 // schedule the timer
-                _timer.expires_after(std::chrono::seconds(timeout));
+                _timer.expires_after(std::chrono::seconds(_timeout));
 
                 // Posts the timer event
-                _timer.async_wait(get_timer_handler(connection, timeout));
+                _timer.async_wait(get_timer_handler(connection, fd));
             }
         }
 
@@ -461,26 +440,27 @@ protected:
 protected:
 
     /**
-     *  Method that is called when the heartbeat frequency is negotiated between the server and the client.
-     *  @param  connection      The connection that suggested a heartbeat interval
-     *  @param  interval        The suggested interval from the server
-     *  @return uint16_t        The interval to use
+     *  Method that is called when the heartbeat frequency is negotiated.
+     *  @param  connection      The connection that suggested a heartbeat timeout
+     *  @param  timeout         The suggested timeout from the server (seconds)
+     *  @return uint16_t        The timeout to use
      */
-    virtual uint16_t onNegotiate(TcpConnection *connection, uint16_t interval) override
+    uint16_t onNegotiate(TcpConnection *connection, uint16_t timeout) override
     {
         // skip if no heartbeats are needed
-        if (interval == 0) return 0;
+        if (timeout == 0) return 0;
 
-        const auto fd = connection->fileno();
+        const int fd = connection->fileno();
 
         auto iter = _watchers.find(fd);
         if (iter == _watchers.end()) return 0;
 
-        // set the timer
-        iter->second->set_timer(connection, interval);
+        // apply heartbeat monitor
+        iter->second->set_heartbeat(timeout);
+        iter->second->set_timer(connection, fd);
 
-        // we agree with the interval
-        return interval;
+        // we agree with the timeout
+        return timeout;
     }
 
 public:
