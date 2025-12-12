@@ -240,13 +240,10 @@ protected:
                            TcpConnection *const connection,
                            const int fd)
         {
-            if (!ec)
+            if (!ec && _socket.is_open())
             {
-                if (connection)
-                {
-                    // send the heartbeat
-                    connection->heartbeat();
-                }
+                // send the heartbeat
+                connection->heartbeat();
 
                 // reschedule the timer
                 _timer.expires_after(std::chrono::seconds(_timeout));
