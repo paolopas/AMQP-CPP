@@ -239,6 +239,13 @@ protected:
 
             if (!ec && _write)
             {
+                if (_timeout)
+                {
+                    // the client is sending data, update the _next time
+                    _next = std::chrono::steady_clock::now() +
+                            std::chrono::seconds((_timeout >> 1) + 1);
+                }
+
                 connection->process(fd, AMQP::writable);
 
                 // still we need monitoring write?
