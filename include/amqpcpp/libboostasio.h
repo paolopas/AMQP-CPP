@@ -12,6 +12,7 @@
  *
  *
  *  @author Gavin Smith <gavin.smith@coralbay.tv>
+ *  @author Paolo Pastori
  */
 
 /**
@@ -265,7 +266,7 @@ protected:
     public:
 
         /**
-         *  Constructor- initialises the watcher and assigns the filedescriptor to
+         *  Constructor - initialises the watcher and assigns the filedescriptor to
          *  a boost socket for monitoring.
          *  @param  io_context      The boost io_context
          *  @param  wpstrand        A weak pointer to a io_context::strand instance.
@@ -293,17 +294,17 @@ protected:
         Watcher(const Watcher &that) = delete;
 
         /**
-         *  Destructor
+         *  Destructors
          */
-        ~Watcher()
+        void close()
         {
-            _read = false;
-            _write = false;
             // release ownership of filedescriptor and cancel pending io callbacks
             _socket.release();
             // cancel any pending timer callback
             stop_timer();
         }
+
+        ~Watcher() { close(); }
 
         /**
          *  Change the events for which the filedescriptor is monitored
@@ -416,19 +417,24 @@ protected:
             // we did not yet have this watcher - but that is ok if no filedescriptor was registered
             if (flags == 0){ return; }
 
-            // construct a new pair (watcher/timer), and put it in the map
-            const std::shared_ptr<Watcher> apWatcher =
+            // construct a new watcher
+            const std::shared_ptr<Watcher> spwatcher =
                 std::make_shared<Watcher>(_iocontext, _strand, fd);
 
-            _watchers[fd] = apWatcher;
+            // register as active
+            _watchers[fd] = spwatcher;
 
             // explicitly set the events to monitor
-            apWatcher->events(connection, fd, flags);
+            spwatcher->events(connection, fd, flags);
         }
         else if (flags == 0)
         {
-            // the watcher does already exist, but we no longer have to watch this watcher
+            // the watcher does not need anymore, unregister
             _watchers.erase(iter);
+
+            // have to release the filedescriptor immediately, cannot rely on the
+            // dtor for that since must wait for all the callback to terminate
+            iter->second->close();
         }
         else
         {
