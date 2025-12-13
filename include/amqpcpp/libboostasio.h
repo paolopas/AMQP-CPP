@@ -26,6 +26,7 @@
 #include <memory>
 #include <chrono>
 #include <functional>
+#include <cassert>
 
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/io_context_strand.hpp>
@@ -502,7 +503,7 @@ protected:
         if (iter == _watchers.end())
         {
             // a new watcher is required
-            if (flags == 0){ return; } // FIXME: a watcher should not be dead on arrival
+            assert(flags != 0); // a watcher should not be dead on arrival
 
             // construct a new watcher
             const std::shared_ptr<Watcher> spwatcher =
@@ -549,7 +550,7 @@ protected:
         const int fd = connection->fileno();
 
         auto iter = _watchers.find(fd);
-        if (iter == _watchers.end()) return 0; // FIXME: a watcher must exist when negotiating the heartbeat
+        assert(iter != _watchers.end()); // a watcher must exist when negotiating the heartbeat
 
         // apply heartbeat monitor
         iter->second->set_heartbeat(timeout);
