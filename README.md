@@ -925,7 +925,7 @@ channel2.declareExchange("my-exchange");
 
 Now, if an error occurs with declaring the queue, it will not have consequences
 for the other call. But this comes at a small price: setting up the extra channel
-requires and extra instruction to be sent to the RabbitMQ server, so some extra
+requires an extra instruction to be sent to the RabbitMQ server, so some extra
 bytes are sent over the network, and some additional resources in both the client
 application and the RabbitMQ server are used (although this is all very limited).
 
@@ -1097,7 +1097,7 @@ bool publish(const std::string &exchange, const std::string &routingKey, const c
 Published messages are normally not confirmed by the server, and the RabbitMQ
 will not send a report back to inform you whether the message was successfully
 published or not. But with the flags you can instruct RabbitMQ to send back
-the message if it was undeliverable. In you use these flags you must also install
+the message if it was undeliverable. If you use these flags you must also install
 callbacks that will process these bounced messages.
 
 You can also use transactions to ensure that your messages get delivered.
@@ -1146,7 +1146,7 @@ the server starts counting the received messages (starting from 1) and sends
 acknowledgments for every message it processed (it can also acknowledge 
 multiple message at once). 
 
-If server is unable to process a message, it will send send negative 
+If server is unable to process a message, it will send negative 
 acknowledgments. Both positive and negative acknowledgments handling are 
 passed to callbacks that you can install on the object that
 is returned by the `confirmSelect()` method:
@@ -1190,7 +1190,7 @@ operations are individually acknowledged:
 // create a channel
 AMQP::TcpChannel mychannel(connection);
 
-// wrap the channel into a reliable-object so that publish-opertions are
+// wrap the channel into a reliable-object so that publish-operations are
 // individually confirmed (after wrapping the channel, it is recommended
 // to no longer make direct calls to the channel)
 AMQP::Reliable reliable(mychannel);
@@ -1289,7 +1289,7 @@ for (size_t i = 0; i < 100000; ++i)
 }
 ````
 
-For more information, see http://www.rabbitmq.com/confirms.html.
+For more information, see http://www.rabbitmq.com/docs/confirms.
 
 CONSUMING MESSAGES
 ==================
