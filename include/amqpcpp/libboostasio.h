@@ -114,28 +114,22 @@ protected:
         steady_time_point _expire;
 
         /**
+         *  The events for which the socket filedescriptor is actually monitored.
+         *  @var int
+         */
+        int _events = 0;
+
+        /**
          *  A boolean that indicates if the watcher is monitoring for read events.
          *  @var _read True if reads are being monitored else false.
          */
         bool _read = false;
 
         /**
-         *  A boolean that indicates if the watcher has a pending read event.
-         *  @var _read_pending True if read is pending else false.
-         */
-        bool _read_pending = false;
-
-        /**
          *  A boolean that indicates if the watcher is monitoring for write events.
          *  @var _write True if writes are being monitored else false.
          */
         bool _write = false;
-
-        /**
-         *  A boolean that indicates if the watcher has a pending write event.
-         *  @var _write_pending True if read is pending else false.
-         */
-        bool _write_pending = false;
 
         using handler_cb = std::function<void(boost::system::error_code)>;
 
@@ -192,8 +186,6 @@ protected:
                           TcpConnection *const connection,
                           const int fd)
         {
-            _read_pending = false;
-
             if (!ec && _read)
             {
                 if (_timeout)
@@ -208,9 +200,7 @@ protected:
                 // still we need monitoring read?
                 if (_socket.is_open())
                 {
-                    _read_pending = true;  // This is a problem waiting to manifest,
-                       /////////////          what if suspended here while more events
-                    _socket.async_wait(    // occurs?  See bottom NOTE
+                    _socket.async_wait(
                         boost::asio::posix::stream_descriptor::wait_read,
                         get_read_handler(connection, fd));
                 }
@@ -235,8 +225,6 @@ protected:
                            TcpConnection *const connection,
                            const int fd)
         {
-            _write_pending = false;
-
             if (!ec && _write)
             {
                 if (_timeout)
@@ -251,9 +239,7 @@ protected:
                 // still we need monitoring write?
                 if (_socket.is_open())
                 {
-                    _write_pending = true;  // This is a problem waiting to manifest,
-                       /////////////           what if suspended here while more events
-                    _socket.async_wait(     // occurs?  See bottom NOTE
+                    _socket.async_wait(
                         boost::asio::posix::stream_descriptor::wait_write,
                         get_write_handler(connection, fd));
                 }
@@ -376,34 +362,39 @@ protected:
 
         /**
          *  Change the events for which the filedescriptor is monitored
-         *  @param  events
+         *  @param  connection  The connection being watched.
+         *  @param  fd          The file descripter being watched.
+         *  @param  events      The events to monitor (readable, writable or both)
          */
-        void events(TcpConnection *connection, int fd, int events)
+        void events(TcpConnection *const connection, int fd, int events)
         {
-            // 1. Handle reads?
-            _read = ((events & AMQP::readable) != 0);
-
-            // Read requsted but no read pending?
-            if (_read && !_read_pending)
+            if (events != _events)
             {
-                _read_pending = true;  // This is a problem waiting to manifest,
-                   /////////////          what if suspended here while more events
-                _socket.async_wait(    // occurs?  See bottom NOTE
-                    boost::asio::posix::stream_descriptor::wait_read,
-                    get_read_handler(connection, fd));
-            }
+                // cancel pending io callback
+                _socket.cancel();
 
-            // 2. Handle writes?
-            _write = ((events & AMQP::writable) != 0);
+                // handle reads?
+                _read = ((events & AMQP::readable) != 0);
 
-            // Write requested but no write pending?
-            if (_write && !_write_pending)
-            {
-                _write_pending = true;  // This is a problem waiting to manifest,
-                   /////////////           what if suspended here while more events
-                _socket.async_wait(     // occurs?  See bottom NOTE
-                    boost::asio::posix::stream_descriptor::wait_write,
-                    get_write_handler(connection, fd));
+                if (_read)
+                {
+                    _socket.async_wait(
+                        boost::asio::posix::stream_descriptor::wait_read,
+                        get_read_handler(connection, fd));
+                }
+
+                // handle writes?
+                _write = ((events & AMQP::writable) != 0);
+
+                if (_write)
+                {
+                    _socket.async_wait(
+                        boost::asio::posix::stream_descriptor::wait_write,
+                        get_write_handler(connection, fd));
+                }
+
+                // remember current events
+                _events = events;
             }
         }
 
@@ -510,8 +501,8 @@ protected:
         // was it found?
         if (iter == _watchers.end())
         {
-            // we did not yet have this watcher - but that is ok if no filedescriptor was registered
-            if (flags == 0){ return; }
+            // a new watcher is required
+            if (flags == 0){ return; } // FIXME: a watcher should not be dead on arrival
 
             // construct a new watcher
             const std::shared_ptr<Watcher> spwatcher =
@@ -537,7 +528,7 @@ protected:
         }
         else
         {
-            // Change the events on which to act.
+            // reconfigure the events to monitor
             iter->second->events(connection, fd, flags);
         }
     }
@@ -558,7 +549,7 @@ protected:
         const int fd = connection->fileno();
 
         auto iter = _watchers.find(fd);
-        if (iter == _watchers.end()) return 0;
+        if (iter == _watchers.end()) return 0; // FIXME: a watcher must exist when negotiating the heartbeat
 
         // apply heartbeat monitor
         iter->second->set_heartbeat(timeout);
@@ -617,13 +608,18 @@ public:
 }
 /*
  * NOTE
- * Regarding the limitations of this handler.
+ * Regarding the peculiarities of this handler.
+ *
+ * To avoid confusion here I use the term callback to refer to the completion
+ * handler of boost asio, while I speak of handler with reference to the
+ * LibBoostAsioHandler.
  *
  * This handler is inspired by the others that preceded it (i.e. LibEvHandler,
  * LibEventHandler, LibUvHandler), but the strategy used to monitor the socket
  * filedescriptor is completely different.  While other handlers rely on calls
  * like select/poll or similar to be woken up when a filedescriptor becomes
- * readable/writable, this one uses boost's async_wait.
+ * readable/writable, this one uses boost asio's async_wait.
+ *
  * Since callbacks queued in the execution context are not automatically
  * requeued once executed, additional work is required to continue monitoring
  * the socket's readability/writableness.  This is not necessary with the other
@@ -631,16 +627,28 @@ public:
  * checks multiple conditions *simultaneously*, whereas here we are also forced
  * to manage readable and writeable conditions separately.
  *
- * This brings us to the need to use a state machine, which is implemented here
- * using the boolean flags _read, _read_pending, _write, _write_pending.
- * As you can see the _pending flags are used to reschedule callbacks, so if
- * for some reason the thread is suspended after setting the flag but before
- * rescheduling the callback this can result in missed reads/writes.
+ * It is therefore essential that when the library requires monitoring a file
+ * descriptor being read, there is always a handler queued in the execution
+ * context (or executing) that takes care of it.  This condition is signaled by
+ * the _read flag of the Watcher which takes care of the relative
+ * filedescriptor.  The same goes for writing.
  *
- * Even though all library callbacks are executed in order on the same strand,
- * this is YET ANOTHER reason to stick to a single-threaded execution model.
+ * Probably even more importantly, this callback must not only be there but
+ * also be UNIQUE.  In the past, this handler had many problems related to the
+ * simultaneous existence of multiple callbacks monitoring the same condition
+ * on the same filedescriptor.  Typically this happened with TLS connections.
  *
- * Anyway I have already fixed this race condition in a future version of the
- * handler that will do without such flags.
+ * However, there are also cases where a single callback causes problems,
+ * because it simply shouldn't exist.  To understand these cases, consider that
+ * the boost reactor doesn't terminate execution if there are queued callbacks.
+ * In short, io_context::run() doesn't return unless we clear all callbacks.
+ * Under these conditions, a program refuses to terminate and hangs.
+ *
+ * So it's important to make sure we clear out all callbacks as soon as
+ * they're no longer needed.
+ *
+ * Ensuring that there aren't too many callbacks is definitely the handler's
+ * responsibility.  But deleting them all at the end may in some cases require
+ * the cooperation of the handler's user.
  *                                                             Paolo
  */
