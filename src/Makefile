@@ -7,8 +7,10 @@ SHARED_LIB			= lib$(LIBRARY_NAME).so.$(VERSION)
 STATIC_LIB			= lib$(LIBRARY_NAME).a.$(VERSION)
 SOURCES				= $(wildcard *.cpp) $(wildcard linux_tcp/*.cpp)
 SHARED_OBJECTS		= $(SOURCES:%.cpp=%.o)
+SHARED_DEPS			= $(SHARED_OBJECTS:%.o=%.d)
 STATIC_OBJECTS		= $(SOURCES:%.cpp=%.s.o)
-DEPENDENCIES		= $(SOURCES:%.cpp=%.d)
+STATIC_DEPS			= $(STATIC_OBJECTS:%.o=%.d)
+DEPENDENCIES		= $(SHARED_DEPS) $(STATIC_DEPS)
 PURE_SHARED_OBJECTS	= $(filter-out tcpconnection.o, $(SOURCES:%.cpp=%.o))
 PURE_STATIC_OBJECTS	= $(filter-out tcpconnection.s.o, $(SOURCES:%.cpp=%.s.o))
 
@@ -19,7 +21,14 @@ else
     SONAMEPARAMETER = -soname
 endif
 
--include ${DEPENDENCIES}
+ifeq ($(MAKECMDGOALS),shared)
+-include ${SHARED_DEPS}
+else ifeq ($(MAKECMDGOALS),static)
+-include ${STATIC_DEPS}
+else
+-include ${SHARED_DEPS}
+-include ${STATIC_DEPS}
+endif
 
 all:			CPPFLAGS += -g
 all:			LD_FLAGS += -g
