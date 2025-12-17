@@ -62,7 +62,6 @@ add_sources(
     exchangeunbindokframe.h
     extframe.h
     field.cpp
-    flags.cpp
     framecheck.h
     headerframe.h
     heartbeatframe.h
