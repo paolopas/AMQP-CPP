@@ -48,6 +48,7 @@
 #include <memory>
 #include <chrono>
 #include <functional>
+#include <algorithm>
 #include <cassert>
 
 #include <boost/asio/io_context.hpp>
@@ -518,7 +519,9 @@ protected:
         if (iter == _watchers.end())
         {
             // a new watcher is required
-            assert(flags != 0); // a watcher should not be dead on arrival
+
+            // should have some flags, unless there was an early release
+            if (flags == 0) return;
 
             // construct a new watcher
             const std::shared_ptr<Watcher> spwatcher =
@@ -575,6 +578,41 @@ protected:
         return timeout;
     }
 
+    /**
+     *  Stop handling connection(s).
+     *
+     *  Note that you cannot continue using the connection(s) after calling
+     *  this method.
+     *  @param  connection  The TcpConnection to release (all by default).
+     *  @return bool        If there was a release.
+     */
+    bool release(const TcpConnection *connection = nullptr)
+    {
+        if (connection == nullptr)
+        {
+            // close all watchers
+            for (auto &wp : _watchers) wp.second->close();
+            auto b = _watchers.begin();
+            return b != _watchers.erase(b, _watchers.end());
+        }
+        else
+        {
+            int fd = connection->fileno();
+            // is the connection already closed?
+            if (fd != -1) {
+                // close matching watcher
+                auto iter = _watchers.find(fd);
+                if (iter != _watchers.end())
+                {
+                    iter->second->close();
+                    _watchers.erase(iter);
+                    return true;
+                }
+            }
+            return false;
+        }
+    }
+
 public:
 
     /**
@@ -615,7 +653,10 @@ public:
     /**
      *  Destructor
      */
-    ~LibBoostAsioHandler() override = default;
+    ~LibBoostAsioHandler() override
+    {
+        release();
+    }
 };
 
 /**
@@ -665,7 +706,8 @@ public:
  *
  * Ensuring that there aren't too many callbacks is definitely the handler's
  * responsibility.  But deleting them all at the end may in some cases require
- * the cooperation of the handler's user.
+ * the cooperation of the handler's user, at this purpose see the handler's
+ * release method.
  *
  *
  * [2] About LibBoostAsio and thread safety.
