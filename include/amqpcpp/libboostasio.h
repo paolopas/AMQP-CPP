@@ -378,12 +378,12 @@ protected:
         ~Watcher() { close(); }
 
         /**
-         *  Change the events for which the filedescriptor is monitored
+         *  Set the events for which the filedescriptor is monitored
          *  @param  connection  The connection being watched.
          *  @param  fd          The file descripter being watched.
          *  @param  events      The events to monitor (readable, writable or both)
          */
-        void events(TcpConnection *const connection, int fd, int events)
+        void set_event_mask(TcpConnection *const connection, int fd, int events)
         {
             if (events != _events)
             {
@@ -523,18 +523,17 @@ protected:
             // should have some flags, unless there was an early release
             if (flags == 0) return;
 
-            // construct a new watcher
-            const std::shared_ptr<Watcher> spwatcher =
+            // construct a new watcher, and register as active
+            _watchers[fd] =
                 std::make_shared<Watcher>(_iocontext, _strand, fd, _connection_timeout);
 
-            // register as active
-            _watchers[fd] = spwatcher;
+            auto &spwatcher = _watchers[fd];
 
             // apply server connection timeout monitor
             spwatcher->apply_connection_timeout(connection, fd);
 
             // explicitly set the events to monitor
-            spwatcher->events(connection, fd, flags);
+            spwatcher->set_event_mask(connection, fd, flags);
         }
         else if (flags == 0)
         {
@@ -548,7 +547,7 @@ protected:
         else
         {
             // reconfigure the events to monitor
-            iter->second->events(connection, fd, flags);
+            iter->second->set_event_mask(connection, fd, flags);
         }
     }
 
