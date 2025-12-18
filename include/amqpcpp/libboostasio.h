@@ -1,4 +1,27 @@
-/**
+/*
+ * This software is the product of voluntary contributions, which Copernica BV
+ * distributes alongside with the proprietary code for the sole purpose of
+ * allowing its circulation, and is subject to the same license terms:
+ *
+ * Copyright 2025 Copernica BV
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ * Specifically, regarding the code contained in this file, Copernica BV
+ * IS NOT INVOLVED IN ANY ACTIVITY BEYOND DISTRIBUTION. IT DOES NOT PROVIDE
+ * TECHNICAL SUPPORT, MAINTENANCE, OR ANY OTHER SERVICES.
+ *
+ *
  *  LibBoostAsio.h
  *
  *  Implementation for the AMQP::TcpHandler for boost::asio. You can use this class
@@ -6,9 +29,8 @@
  *  constructor and you're all set.  See examples/libboostasio.cpp for an example.
  *
  *  Watch out: this class was not implemented or reviewed by the original author of
- *  AMQP-CPP. However, we do get a lot of questions and issues from users of this class,
- *  so we cannot guarantee its quality. If you run into such issues too, it might be
- *  better to implement your own handler that interact with boost.
+ *  AMQP-CPP. If you run into some issues, it might be better to implement your own
+ *  handler that interact with boost.
  *
  *
  *  @author Gavin Smith <gavin.smith@coralbay.tv>
@@ -601,8 +623,8 @@ public:
  */
 }
 /*
- * NOTE
- * Regarding the peculiarities of this handler.
+ * [1] Regarding the peculiarities of this handler.
+ *     ============================================
  *
  * To avoid confusion here I use the term callback to refer to the completion
  * handler of boost asio, while I speak of handler with reference to the
@@ -622,7 +644,7 @@ public:
  * to manage readable and writeable conditions separately.
  *
  * It is therefore essential that when the library requires monitoring a file
- * descriptor being read, there is always a handler queued in the execution
+ * descriptor being read, there is always a callback queued in the execution
  * context (or executing) that takes care of it.  This condition is signaled by
  * the _read flag of the Watcher which takes care of the relative
  * filedescriptor.  The same goes for writing.
@@ -644,5 +666,27 @@ public:
  * Ensuring that there aren't too many callbacks is definitely the handler's
  * responsibility.  But deleting them all at the end may in some cases require
  * the cooperation of the handler's user.
+ *
+ *
+ * [2] About LibBoostAsio and thread safety.
+ *     =====================================
+ *
+ * AMQP-CPP is not thread safe, we cannot repeat this too many times.
+ *
+ * But I think we should definitely give credit to Gavin Smith, the original
+ * author of this handler, for the intuition that with the help of the boost
+ * reactor it could get pretty close.  The reactor ensures that queued
+ * callbacks are executed exclusively by threads that are running the context
+ * (io_context::run()) and the io_context::strand ensures that each callback
+ * is executed sequentially and every other thread in the pool sees its effects.
+ *
+ * So boost magically makes AMQP-CPP thread safe?
+ *
+ * IF ALL THE THREADS INVOLVED ARE RUNNING THE CONTEXT THEN ALL THE CALLS TO
+ * AMQP-CPP ORIGINATE FROM CALLBACKS AND THEREFORE THERE ARE NO PROBLEMS
+ *                                   BUT
+ * IF A THREAD INTERACTS WITH THE LIBRARY WITHOUT GOING THROUGH THE REACTOR
+ * (for example it directly invoke publish) THEN EXPECT AN INDETERMINATE
+ * BEHAVIOR.
  *                                                             Paolo
  */
