@@ -79,13 +79,11 @@ protected:
     {
     private:
 
-        using strand_weak_ptr = std::weak_ptr<boost::asio::io_context::strand>;
-
         /**
-         *  The boost asio io_context::strand managed pointer.
-         *  @var std::weak_ptr<boost::asio::io_context::strand>
+         *  The parent Handler.
+         *  @var LibBoostAsioHandler
          */
-        strand_weak_ptr _wpstrand;
+        LibBoostAsioHandler *_parent;
 
         /**
          *  The boost tcp socket.
@@ -167,26 +165,21 @@ protected:
 #else
             std::weak_ptr<Watcher> wpthis(shared_from_this());
 #endif
-            const strand_weak_ptr wpstrand = _wpstrand;
 
             return
 #if __cplusplus >= 201402L
                 // C++14 lambda has init capture
-                [wpthis=std::move(wpthis), wpstrand=std::move(wpstrand), mmfn=std::forward<M>(mmfn),
+                [wpthis=std::move(wpthis), mmfn=std::forward<M>(mmfn),
                                          connection, fd] (const boost::system::error_code& ec)
 #else
-                [wpthis, wpstrand, mmfn, connection, fd] (const boost::system::error_code& ec)
+                [wpthis, mmfn, connection, fd] (const boost::system::error_code& ec)
 #endif
                 {
                     const std::shared_ptr<Watcher> spwatcher = wpthis.lock();
                     // is the watcher still here?
                     if (!spwatcher) return;
 
-                    const strand_shared_ptr strand = wpstrand.lock();
-                    // is the strand still here?
-                    if (!strand) return;
-
-                    boost::asio::dispatch(*strand,
+                    boost::asio::dispatch(spwatcher->_parent->_strand,
                         // moving spwatcher into the bind ensures that the watcher
                         // will not be destroyed for the duration of the callback
                         std::bind(std::move(mmfn), std::move(spwatcher), ec, connection, fd));
@@ -343,10 +336,10 @@ protected:
          *  @param  connection_timeout   The AMQP server connection timeout
          */
         Watcher(boost::asio::io_context &io_context,
-                const strand_weak_ptr wpstrand,
+                LibBoostAsioHandler *parent,
                 const int fd,
                 uint16_t connection_timeout) :
-            _wpstrand(wpstrand),
+            _parent(parent),
             _socket(io_context),
             _timer(io_context),
             _connection_timeout(connection_timeout)
@@ -482,13 +475,11 @@ protected:
      */
     boost::asio::io_context & _iocontext;
 
-    using strand_shared_ptr = std::shared_ptr<boost::asio::io_context::strand>;
-
     /**
      *  The boost asio io_context::strand managed pointer.
-     *  @var std::shared_ptr<boost::asio::io_context::strand>
+     *  @var boost::asio::io_context::strand
      */
-    strand_shared_ptr _strand;
+    boost::asio::io_context::strand _strand;
 
     /**
      *  Active I/O watchers, indexed by their filedescriptor.
@@ -525,7 +516,7 @@ protected:
 
             // construct a new watcher, and register as active
             _watchers[fd] =
-                std::make_shared<Watcher>(_iocontext, _strand, fd, _connection_timeout);
+                std::make_shared<Watcher>(_iocontext, this, fd, _connection_timeout);
 
             auto &spwatcher = _watchers[fd];
 
@@ -627,7 +618,7 @@ public:
     explicit LibBoostAsioHandler(boost::asio::io_context &io_context,
                                  uint16_t connection_timeout = 60) :
         _iocontext(io_context),
-        _strand(std::make_shared<boost::asio::io_context::strand>(_iocontext)),
+        _strand(io_context),
         _connection_timeout(connection_timeout)
     {
     }
