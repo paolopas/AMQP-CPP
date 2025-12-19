@@ -22,7 +22,7 @@
  * TECHNICAL SUPPORT, MAINTENANCE, OR ANY OTHER SERVICES.
  *
  *
- *  libUV.h
+ *  LibUV.h
  *
  *  Implementation for the AMQP::TcpHandler that is optimized for libuv. You can
  *  use this class instead of a AMQP::TcpHandler class, just pass the event loop
@@ -158,6 +158,12 @@ private:
         uint64_t _expire;
 
         /**
+         *  The events for which the filedescriptor is actually monitored.
+         *  @var int
+         */
+        int _events = 0;
+
+        /**
          *  Callback method that is called by libuv when a filedescriptor becomes active
          *  @param  handle   io handle
          *  @param  status   LibUV error code UV_*, see https://docs.libuv.org/en/v1.x/errors.html
@@ -277,6 +283,9 @@ private:
             _poll->data = this;
             _timer->data = this;
 
+            // remember current event mask
+            _events = events;
+
             // start the watcher
             uv_poll_start(_poll, events, io_callback);
         }
@@ -313,10 +322,8 @@ private:
          */
         void set_event_mask(int events)
         {
-            // save last event mask to avoid useless handle update,
+            // avoid useless handle update,
             // see https://docs.libuv.org/en/v1.x/poll.html
-            static int _events = 0;
-
             if (events != _events)
             {
                 // update the events being watched for
@@ -428,9 +435,6 @@ private:
 
             // apply server connection timeout monitor
             upwatcher->apply_connection_timeout();
-
-            // explicitly set the events to monitor
-            upwatcher->set_event_mask(flags);
         }
         else if (flags == 0)
         {
@@ -474,7 +478,8 @@ public:
 
     /**
      *  Constructor
-     *  @param  loop    The event loop to wrap
+     *  @param  loop                The event loop to wrap
+     *  @param  connection_timeout  The AMQP server connection timeout (seconds)
      */
     LibUvHandler(uv_loop_t *loop, uint16_t connection_timeout = 60)
         : _loop(loop), _connection_timeout(connection_timeout)

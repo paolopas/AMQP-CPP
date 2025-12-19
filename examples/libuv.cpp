@@ -22,7 +22,7 @@
  * TECHNICAL SUPPORT, MAINTENANCE, OR ANY OTHER SERVICES.
  *
  *
- *  libUV.cpp
+ *  LibUV.cpp
  *
  *  Test program to check AMQP functionality based on libuv.
  *
