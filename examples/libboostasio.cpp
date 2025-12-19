@@ -35,7 +35,7 @@
 /*
  * uncomment (and link with -lssl) to use amqps instead of plain amqp
  */
-#define USE_AMQPS
+//#define USE_AMQPS
 
 /**
  *  Dependencies
@@ -63,16 +63,10 @@ class MyTimer
 {
 private:
     /**
-     *  The actual timer
+     *  The asynchronous timer
      *  @var boost::asio::steady_timer
      */
     boost::asio::steady_timer _timer;
-
-    /**
-     *  The counter for published messages
-     *  @var uint16_t
-     */
-    uint16_t _pno = 0;
 
 protected:
     /**
@@ -83,10 +77,13 @@ protected:
     {
         if (!ec && pchannel)
         {
+            // counter for published messages
+            static uint32_t pno = 0;
+
             // publish a message
             pchannel->publish("", queue, "Hello World");
 
-            std::cout << "message " << ++_pno << " published" << std::endl;
+            std::cout << "message " << ++pno << " published" << std::endl;
 
             // reschedule
             start();
@@ -101,7 +98,7 @@ public:
     uint16_t milli_seconds = 1000;
 
     /**
-     *  Pointer towards the AMQP channel
+     *  The AMQP channel
      *  @var AMQP::TcpChannel
      */
     AMQP::TcpChannel *pchannel;
@@ -191,6 +188,7 @@ private:
         // install the signals handler
         _signals.async_wait([this, connection](const boost_errc& ec, int /* signal_number */) {
             if (!ec) {
+
                 // now we gently close the connection
                 std::cerr << "\nclosing connection...\n";
 
@@ -282,7 +280,7 @@ protected:
      */
     uint16_t onNegotiate(AMQP::TcpConnection *connection, uint16_t interval) override
     {
-        // could override server proposed interval here, i.e.
+        // could override server proposed interval here, e.g.
         // uncoment to force interval 0 to suppress heartbeat
         //interval = 0;
 
@@ -370,7 +368,7 @@ int main()
     channel.declareQueue(AMQP::exclusive)
       .onSuccess([&connection, &channel, &timer, &handler](const std::string &queuename, uint32_t messagecount, uint32_t consumercount) {
 
-        std::cout << "declared queue " << quoted(queuename) << std::endl;
+        std::cout << "declared queue " << std::quoted(queuename) << std::endl;
 
         timer.queue = queuename;
 
@@ -402,7 +400,7 @@ int main()
         }).onSuccess([&timer](const std::string &tag) {
 
             // the consumer is ready
-            std::cout << "started consuming with tag " << quoted(tag) << std::endl;
+            std::cout << "started consuming with tag " << std::quoted(tag) << std::endl;
 
             // start the publisher too
             timer.start();
@@ -410,32 +408,12 @@ int main()
         }).onCancelled([&timer](const std::string &tag) {
 
             // the consumer was cancelled by the server
-            std::cout << "consumer " << quoted(tag) << " was cancelled" << std::endl;
+            std::cout << "consumer " << std::quoted(tag) << " was cancelled" << std::endl;
 
             // stop the publisher
             timer.stop();
-
-        }).onError([&timer, &connection, &handler](const char *message) {
-
-            // the consumer was cancelled by the server
-            std::cout << "consumer operation failed" << std::endl;
-
-            // stop the publisher
-            timer.stop();
-
-            // close the connection
-            connection.close();
-
-            // NOTE: there must be no callabacks queued in execution
-            //       context otherwise the process will hang
-            handler.stop_signals();
 
         });
-
-/*        // close the connection
-        connection.close();
-        // NOTE: this will have no effect, as the timer is not started yet
-        timer.stop(); */
     });
 
     // run the handler

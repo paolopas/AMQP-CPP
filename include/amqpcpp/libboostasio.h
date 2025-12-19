@@ -476,7 +476,7 @@ protected:
     boost::asio::io_context & _iocontext;
 
     /**
-     *  The boost asio io_context::strand managed pointer.
+     *  The boost asio strand.
      *  @var boost::asio::io_context::strand
      */
     boost::asio::io_context::strand _strand;
