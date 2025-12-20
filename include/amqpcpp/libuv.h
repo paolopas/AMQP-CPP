@@ -46,6 +46,7 @@
 // >= C++14, using make_unique
 #include <memory>
 #endif
+#include <type_traits>
 #include <map>
 #include <cassert>
 
@@ -79,7 +80,8 @@ namespace UV_AUX {
      * Helper template function for closing libuv handles,
      * see https://docs.libuv.org/en/v1.x/handle.html#c.uv_close
      */
-    template <typename H>
+    template <typename H,
+         typename = std::enable_if_t<std::is_same<H, uv_poll_t>::value || std::is_same<H, uv_timer_t>::value || std::is_same<H, uv_signal_t>::value > >
     void close_handle(H *handle)
     {
         uv_close(reinterpret_cast<uv_handle_t*>(handle), [](uv_handle_t* hndl) {
@@ -173,7 +175,7 @@ private:
         {
             Watcher *self = static_cast<Watcher*>(handle->data);
 
-            // is the socket still open()?
+            // is the socket still open?
             int fd = ::UV_AUX::handle_fileno(handle);
             if (fd != -1)
             {
@@ -211,7 +213,7 @@ private:
         {
             Watcher *self = static_cast<Watcher*>(handle->data);
 
-            // is the socket still open()?
+            // is the socket still open?
             int fd = ::UV_AUX::handle_fileno(self->_poll);
             if (fd != -1)
             {
