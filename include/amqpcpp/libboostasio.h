@@ -80,10 +80,10 @@ protected:
     private:
 
         /**
-         *  The parent Handler.
-         *  @var LibBoostAsioHandler
+         *  The boost asio strand.
+         *  @var boost::asio::io_context::strand
          */
-        LibBoostAsioHandler *_parent;
+        boost::asio::io_context::strand &_strand;
 
         /**
          *  The boost tcp socket.
@@ -177,7 +177,7 @@ protected:
                     }
                     // here, we are guaranteed by design that the "this"
                     // will not dangle without our intervention
-                    boost::asio::dispatch(this->_parent->_strand,
+                    boost::asio::dispatch(this->_strand,
                         std::bind(std::move(mmfn), this, connection, fd));
                 };
         }
@@ -320,21 +320,19 @@ protected:
          *  Constructor - initialises the watcher and assigns the filedescriptor to
          *  a boost socket for monitoring.
          *  @param  io_context           The boost io_context
-         *  @param  parent               The parent Handler
+         *  @param  strand               The boost asio strand
          *  @param  fd                   The filedescriptor being watched
          *  @param  connection_timeout   The AMQP server connection timeout
          */
         Watcher(boost::asio::io_context &io_context,
-                LibBoostAsioHandler *parent,
+                boost::asio::io_context::strand &strand,
                 const int fd,
                 uint16_t connection_timeout) :
-            _parent(parent),
-            _socket(io_context),
+            _strand(strand),
+            _socket(io_context, fd),
             _timer(io_context),
             _connection_timeout(connection_timeout)
         {
-            _socket.assign(fd);
-
             _socket.non_blocking(true);
         }
 
@@ -507,9 +505,9 @@ protected:
             _watchers[fd] =
 #if __cplusplus >= 201402L
             // C++14 has make_unique(
-                std::make_unique<Watcher>(_iocontext, this, fd, _connection_timeout);
+                std::make_unique<Watcher>(_iocontext, _strand, fd, _connection_timeout);
 #else
-                std::unique_ptr<Watcher>(new Watcher(_iocontext, this, fd, _connection_timeout));
+                std::unique_ptr<Watcher>(new Watcher(_iocontext, _strand, fd, _connection_timeout));
 #endif
 
             auto &upwatcher = _watchers[fd];
