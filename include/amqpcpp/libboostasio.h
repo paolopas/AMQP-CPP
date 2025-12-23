@@ -75,7 +75,7 @@ protected:
     /**
      *  Helper class that wraps a boost io_context socket monitor.
      */
-    class Watcher : public std::enable_shared_from_this<Watcher>
+    class Watcher
     {
     private:
 
@@ -147,7 +147,8 @@ protected:
          */
         bool _write = false;
 
-        using handler_cb = std::function<void(boost::system::error_code)>;
+        using boost_errc = boost::system::error_code;
+        using handler_cb = std::function<void(boost_errc)>;
 
         /**
          *  Make a generic handler callback.
@@ -159,30 +160,25 @@ protected:
         template <typename M>
         handler_cb make_handler(M &&mmfn, TcpConnection *const connection, const int fd)
         {
-#if __cplusplus >= 201701L
-            // C++17 has weak_from_this()
-            std::weak_ptr<Watcher> wpthis = weak_from_this();
-#else
-            std::weak_ptr<Watcher> wpthis(shared_from_this());
-#endif
-
             return
 #if __cplusplus >= 201402L
                 // C++14 lambda has init capture
-                [wpthis=std::move(wpthis), mmfn=std::forward<M>(mmfn),
-                                         connection, fd] (const boost::system::error_code& ec)
+                [this, mmfn=std::forward<M>(mmfn), connection, fd] (const boost_errc& ec)
 #else
-                [wpthis, mmfn, connection, fd] (const boost::system::error_code& ec)
+                [this, mmfn, connection, fd] (const boost_errc& ec)
 #endif
                 {
-                    const std::shared_ptr<Watcher> spwatcher = wpthis.lock();
-                    // is the watcher still here?
-                    if (!spwatcher) return;
-
-                    boost::asio::dispatch(spwatcher->_parent->_strand,
-                        // moving spwatcher into the bind ensures that the watcher
-                        // will not be destroyed for the duration of the callback
-                        std::bind(std::move(mmfn), std::move(spwatcher), ec, connection, fd));
+                    if (ec) {
+                        // upon object destruction, all callbacks are invoked with
+                        // the error code boost::asio::error::operation_aborted,
+                        // but regardless of the error, you should exit immediately
+                        // because "this" is likely to be invalidated.
+                        return;
+                    }
+                    // here, we are guaranteed by design that the "this"
+                    // will not dangle without our intervention
+                    boost::asio::dispatch(this->_parent->_strand,
+                        std::bind(std::move(mmfn), this, ec, connection, fd));
                 };
         }
 
@@ -193,7 +189,7 @@ protected:
          *  @param  fd          The file descriptor being watched.
          *  @note   The handler will get called if a read is cancelled.
          */
-        void read_handler(const boost::system::error_code &ec,
+        void read_handler(const boost_errc &ec,
                           TcpConnection *const connection,
                           const int fd)
         {
@@ -207,6 +203,7 @@ protected:
                 }
 
                 connection->process(fd, AMQP::readable);
+                // Beware, the library may have triggered the watcher destruction
 
                 // still we need monitoring read?
                 if (_socket.is_open())
@@ -232,7 +229,7 @@ protected:
          *  @param  fd          The file descriptor being watched.
          *  @note   The handler will get called if a write is cancelled.
          */
-        void write_handler(const boost::system::error_code ec,
+        void write_handler(const boost_errc ec,
                            TcpConnection *const connection,
                            const int fd)
         {
@@ -246,6 +243,7 @@ protected:
                 }
 
                 connection->process(fd, AMQP::writable);
+                // Beware, the library may have triggered the watcher destruction
 
                 // still we need monitoring write?
                 if (_socket.is_open())
@@ -271,7 +269,7 @@ protected:
          *  @param  fd          The file descriptor being watched.
          *  @note   The handler will get called if a timer is cancelled.
          */
-        void timer_handler(const boost::system::error_code &ec,
+        void timer_handler(const boost_errc &ec,
                            TcpConnection *const connection,
                            const int fd)
         {
@@ -331,7 +329,7 @@ protected:
          *  Constructor - initialises the watcher and assigns the filedescriptor to
          *  a boost socket for monitoring.
          *  @param  io_context           The boost io_context
-         *  @param  wpstrand             A weak pointer to a io_context::strand instance.
+         *  @param  parent               The parent Handler
          *  @param  fd                   The filedescriptor being watched
          *  @param  connection_timeout   The AMQP server connection timeout
          */
@@ -485,7 +483,7 @@ protected:
      *  Active I/O watchers, indexed by their filedescriptor.
      *  @var std::map<int, Watcher>
      */
-    std::map<int, std::shared_ptr<Watcher> > _watchers;
+    std::map<int, std::unique_ptr<Watcher>> _watchers;
 
     /**
      *  AMQP Server connection timeout setting (seconds).
@@ -516,24 +514,25 @@ protected:
 
             // construct a new watcher, and register as active
             _watchers[fd] =
-                std::make_shared<Watcher>(_iocontext, this, fd, _connection_timeout);
+#if __cplusplus >= 201402L
+            // C++14 has make_unique(
+                std::make_unique<Watcher>(_iocontext, this, fd, _connection_timeout);
+#else
+                std::unique_ptr<Watcher>(new Watcher(_iocontext, this, fd, _connection_timeout));
+#endif
 
-            auto &spwatcher = _watchers[fd];
+            auto &upwatcher = _watchers[fd];
 
             // apply server connection timeout monitor
-            spwatcher->apply_connection_timeout(connection, fd);
+            upwatcher->apply_connection_timeout(connection, fd);
 
             // explicitly set the events to monitor
-            spwatcher->set_event_mask(connection, fd, flags);
+            upwatcher->set_event_mask(connection, fd, flags);
         }
         else if (flags == 0)
         {
             // the watcher does not need anymore, unregister
             _watchers.erase(iter);
-
-            // have to release the filedescriptor immediately, cannot rely on the
-            // dtor for that since must wait for all the callback to terminate
-            iter->second->close();
         }
         else
         {
