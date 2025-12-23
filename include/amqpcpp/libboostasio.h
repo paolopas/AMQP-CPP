@@ -178,22 +178,19 @@ protected:
                     // here, we are guaranteed by design that the "this"
                     // will not dangle without our intervention
                     boost::asio::dispatch(this->_parent->_strand,
-                        std::bind(std::move(mmfn), this, ec, connection, fd));
+                        std::bind(std::move(mmfn), this, connection, fd));
                 };
         }
 
         /**
          *  Handler method that is called by boost's io_context when the socket pumps a read event.
-         *  @param  ec          The status of the callback.
          *  @param  connection  The connection being watched.
          *  @param  fd          The file descriptor being watched.
-         *  @note   The handler will get called if a read is cancelled.
          */
-        void read_handler(const boost_errc &ec,
-                          TcpConnection *const connection,
+        void read_handler(TcpConnection *const connection,
                           const int fd)
         {
-            if (!ec && _read)
+            if (_read)
             {
                 if (_timeout)
                 {
@@ -224,16 +221,13 @@ protected:
 
         /**
          *  Handler method that is called by boost's io_context when the socket pumps a write event.
-         *  @param  ec          The status of the callback.
          *  @param  connection  The connection being watched.
          *  @param  fd          The file descriptor being watched.
-         *  @note   The handler will get called if a write is cancelled.
          */
-        void write_handler(const boost_errc ec,
-                           TcpConnection *const connection,
+        void write_handler(TcpConnection *const connection,
                            const int fd)
         {
-            if (!ec && _write)
+            if (_write)
             {
                 if (_timeout)
                 {
@@ -264,16 +258,13 @@ protected:
 
         /**
          *  Handler method that is called by boost's io_context when the timer expires.
-         *  @param  ec          The status of the callback.
          *  @param  connection  The connection being watched.
          *  @param  fd          The file descriptor being watched.
-         *  @note   The handler will get called if a timer is cancelled.
          */
-        void timer_handler(const boost_errc &ec,
-                           TcpConnection *const connection,
+        void timer_handler(TcpConnection *const connection,
                            const int fd)
         {
-            if (!ec && _socket.is_open())
+            if (_socket.is_open())
             {
                 steady_time_point now = std::chrono::steady_clock::now();
 
