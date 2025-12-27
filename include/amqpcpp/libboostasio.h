@@ -203,7 +203,7 @@ protected:
                 // Beware, the library may have triggered the watcher destruction
 
                 // still we need monitoring read?
-                if (_socket.is_open())
+                if (_read && _socket.is_open())
                 {
                     _socket.async_wait(
                         boost::asio::posix::stream_descriptor::wait_read,
@@ -240,7 +240,7 @@ protected:
                 // Beware, the library may have triggered the watcher destruction
 
                 // still we need monitoring write?
-                if (_socket.is_open())
+                if (_write && _socket.is_open())
                 {
                     _socket.async_wait(
                         boost::asio::posix::stream_descriptor::wait_write,
@@ -470,7 +470,7 @@ protected:
 
     /**
      *  Active I/O watchers, indexed by their filedescriptor.
-     *  @var std::map<int, Watcher>
+     *  @var std::map<int, std::unique_ptr<Watcher>>
      */
     std::map<int, std::unique_ptr<Watcher>> _watchers;
 
